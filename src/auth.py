@@ -102,10 +102,21 @@ def login_gate():
                 st.rerun()
             else:
                 st.error("Incorrect username or password.")
-        st.caption("Access is restricted. Contact the owner to request credentials.")
+        st.markdown(
+            "<p style='color:#888;font-size:0.85em;margin-top:8px;'>"
+            "Access is restricted. Email "
+            "<a href='mailto:soumoster@gmail.com'>soumoster@gmail.com</a> "
+            "to request credentials.</p>",
+            unsafe_allow_html=True,
+        )
 
     st.divider()
-    st.caption("Educational purposes only — not financial advice.")
+    st.markdown(
+        "<p style='text-align:center;color:#888;font-size:0.85em;'>"
+        "⚠️ Educational purposes only — not financial advice"
+        "&nbsp;&nbsp;·&nbsp;&nbsp; © 2026 Soumoster Analytics</p>",
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 
