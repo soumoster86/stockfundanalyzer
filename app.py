@@ -23,8 +23,14 @@ from src.model import (make_label, train_outperformance_model, predict_proba)
 from src.ranking import rank_universe
 from src.data_quality import (data_completeness, data_sanity_flags, WARNING_TEXT)
 from src.sample_data import sample_csv_bytes, sample_dataframe, COLUMN_DOCS
+from src.auth import login_gate, logout_button
 
 st.set_page_config(page_title="Fundamental Stock Analyzer", layout="wide")
+
+# ---- Access gate: nothing below renders until authenticated ----
+login_gate()
+logout_button()
+
 import tempfile
 MODEL_PATH = os.path.join(tempfile.gettempdir(), "outperformance_model.joblib")
 

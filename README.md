@@ -107,6 +107,30 @@ A summary banner (universe size, sectors, average quality, data warnings) shows
 the moment data loads. The Single Stock Report uses a **category radar chart**;
 the Universe Ranking includes an expandable **score-distribution histogram**.
 
+## Access control (login gate)
+
+The app is protected by a lightweight login (`src/auth.py`). It keeps casual
+visitors out — a *soft* gate, not strong security (fine for public-fundamentals
+data, not for anything sensitive).
+
+**Set it up:**
+1. Generate a password hash locally:
+   ```bash
+   python -c "import hashlib; print(hashlib.sha256('YOURPASSWORD'.encode()).hexdigest())"
+   ```
+2. Add credentials to **Streamlit Cloud → app → Settings → Secrets** (or a local
+   `.streamlit/secrets.toml`, which is gitignored):
+   ```toml
+   [auth.users]
+   soumo = "your_sha256_hash_here"
+   ```
+   Add as many `username = "hash"` lines as you want.
+3. If no secrets are set, the app runs in **demo mode** (login `demo` / `demo`)
+   with a visible warning — so set real credentials before sharing the link.
+
+Passwords are never stored or committed in plaintext (only SHA-256 hashes, only
+in secrets). A "Log out" control appears in the sidebar once signed in.
+
 ## Deploying to Streamlit Community Cloud
 
 The app is deploy-ready (fetch fundamentals locally, then upload/analyze on the cloud).
