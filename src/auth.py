@@ -68,10 +68,23 @@ def login_gate():
 
     users, is_demo = _get_users()
 
+    _LOGO_SVG = (
+        "<svg width='52' height='52' viewBox='0 0 120 120' style='vertical-align:middle;margin-right:14px;'>"
+        "<rect x='0' y='0' width='120' height='120' rx='26' fill='#0E1A14'/>"
+        "<rect x='1' y='1' width='118' height='118' rx='25' fill='none' stroke='#1D9E75' stroke-width='2'/>"
+        "<rect x='30' y='74' width='14' height='22' rx='3' fill='#2E6E55'/>"
+        "<rect x='53' y='58' width='14' height='38' rx='3' fill='#26B583'/>"
+        "<rect x='76' y='40' width='14' height='56' rx='3' fill='#1D9E75'/>"
+        "<path d='M30 58 L52 42 L70 30 L94 26' fill='none' stroke='#7CF0C0' stroke-width='4' "
+        "stroke-linecap='round' stroke-linejoin='round'/>"
+        "<circle cx='94' cy='26' r='5.5' fill='#7CF0C0'/></svg>"
+    )
     st.markdown(
-        "<h1 style='text-align:center;margin-bottom:0;'>📊 Fundamental Stock Analyzer</h1>"
-        "<p style='text-align:center;color:#888;margin-top:4px;'>"
-        "Fundamental quality scoring, ranking & forensic red flags</p>",
+        f"<div style='text-align:center;'>"
+        f"<h1 style='margin-bottom:0;display:inline-flex;align-items:center;justify-content:center;'>"
+        f"{_LOGO_SVG}<span>Fundamental Stock Analyzer</span></h1>"
+        f"<p style='color:#888;margin-top:4px;'>"
+        f"Fundamental quality scoring, ranking &amp; forensic red flags</p></div>",
         unsafe_allow_html=True,
     )
     st.divider()

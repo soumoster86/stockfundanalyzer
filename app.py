@@ -26,7 +26,17 @@ from src.data_quality import (data_completeness, data_sanity_flags, WARNING_TEXT
 from src.sample_data import sample_csv_bytes, sample_dataframe, COLUMN_DOCS
 from src.auth import login_gate, logout_button
 
-st.set_page_config(page_title="Fundamental Stock Analyzer", layout="wide")
+_PAGE_ICON = "📊"
+_logo_png = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+if os.path.exists(_logo_png):
+    try:
+        from PIL import Image as _PILImage
+        _PAGE_ICON = _PILImage.open(_logo_png)
+    except Exception:
+        _PAGE_ICON = "📊"
+
+st.set_page_config(page_title="Fundamental Stock Analyzer",
+                   page_icon=_PAGE_ICON, layout="wide")
 
 # ---- Access gate: nothing below renders until authenticated ----
 login_gate()
@@ -156,7 +166,22 @@ def enrich(df, use_sector=False, config=METRIC_CONFIG):
     return df
 
 
-st.title("📊 Fundamental Stock Analyzer")
+_HEADER_LOGO = (
+    "<svg width='44' height='44' viewBox='0 0 120 120' style='vertical-align:middle;margin-right:12px;'>"
+    "<rect x='0' y='0' width='120' height='120' rx='26' fill='#0E1A14'/>"
+    "<rect x='1' y='1' width='118' height='118' rx='25' fill='none' stroke='#1D9E75' stroke-width='2'/>"
+    "<rect x='30' y='74' width='14' height='22' rx='3' fill='#2E6E55'/>"
+    "<rect x='53' y='58' width='14' height='38' rx='3' fill='#26B583'/>"
+    "<rect x='76' y='40' width='14' height='56' rx='3' fill='#1D9E75'/>"
+    "<path d='M30 58 L52 42 L70 30 L94 26' fill='none' stroke='#7CF0C0' stroke-width='4' "
+    "stroke-linecap='round' stroke-linejoin='round'/>"
+    "<circle cx='94' cy='26' r='5.5' fill='#7CF0C0'/></svg>"
+)
+st.markdown(
+    f"<h1 style='display:inline-flex;align-items:center;margin-bottom:0;'>"
+    f"{_HEADER_LOGO}<span>Fundamental Stock Analyzer</span></h1>",
+    unsafe_allow_html=True,
+)
 st.caption("Quality Score Engine · Self-learning Outperformance Model · Multi-Factor Ranking · Red-Flag Detection")
 
 uploaded = st.sidebar.file_uploader("Upload fundamentals panel (CSV)", type="csv")
