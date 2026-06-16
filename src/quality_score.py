@@ -213,6 +213,52 @@ METRIC_LABELS = {
 }
 
 
+# Plain-English explanations for hover tooltips (what the metric means + how to read it)
+METRIC_TOOLTIPS = {
+    "revenue_growth": "Year-over-year change in total sales. Higher = the business is expanding.",
+    "eps_growth": "Year-over-year change in earnings per share. Higher = profit per share is rising.",
+    "operating_profit_growth": "Growth in profit from core operations (before interest & tax). Higher is better.",
+    "fcf_growth": "Growth in free cash flow — cash left after capital spending. Higher = more real cash generated.",
+    "ebitda_growth": "Growth in earnings before interest, tax, depreciation & amortisation. A rough cash-earnings proxy.",
+    "roe": "Return on Equity: profit as a % of shareholders' money. Higher = more efficient use of equity.",
+    "roce": "Return on Capital Employed: profit as a % of all capital used. Higher = efficient use of total capital.",
+    "net_margin": "Net profit as a % of revenue — how much of each sales rupee becomes bottom-line profit.",
+    "operating_margin": "Operating profit as a % of revenue — profitability of core operations.",
+    "gross_margin": "Revenue minus cost of goods, as a % of revenue — pricing power and production efficiency.",
+    "debt_to_equity": "Total debt relative to equity. Lower = less leverage and less financial risk. (Lower scores higher.)",
+    "interest_coverage": "How many times operating profit covers interest payments. Higher = safer debt servicing.",
+    "current_ratio": "Current assets ÷ current liabilities. Above 1 means short-term bills are covered.",
+    "cash_position": "Cash & equivalents on hand. More cash = more cushion and flexibility.",
+    "dividend_yield": "Annual dividend as a % of share price — income return to shareholders.",
+    "dividend_growth": "Year-over-year growth in dividends paid. Higher = rising shareholder payouts.",
+    "buyback_yield": "Value of share buybacks as a % of market cap — another way cash is returned to owners.",
+    "promoter_holding_change": "Change in promoter (founder/insider) ownership. Rising stake is usually a positive signal. (India)",
+    "pe": "Price ÷ earnings per share — how much you pay per rupee of profit. Lower = cheaper. (Lower scores higher.)",
+    "pb": "Price ÷ book value per share. Lower = cheaper relative to net assets. (Lower scores higher.)",
+    "ev_ebitda": "Enterprise value ÷ EBITDA — valuation including debt. Lower = cheaper. (Lower scores higher.)",
+    "peg": "P/E divided by growth rate. Below ~1 suggests growth is cheaply priced. (Lower scores higher.)",
+    "price_sales": "Price ÷ sales per share. Lower = cheaper relative to revenue. (Lower scores higher.)",
+}
+
+CATEGORY_TOOLTIPS = {
+    "Financial Performance": "Growth metrics — is the business getting bigger? (revenue, EPS, operating profit, FCF, EBITDA growth)",
+    "Profitability": "How efficiently the company turns activity into profit (ROE, ROCE, and three margins).",
+    "Financial Strength": "Balance-sheet resilience — leverage, ability to service debt, liquidity, and cash.",
+    "Shareholder Metrics": "How the company rewards owners — dividends, buybacks, and promoter ownership.",
+    "Valuation": "How expensive the stock is versus fundamentals (P/E, P/B, EV/EBITDA, PEG, P/S). Cheaper scores higher.",
+}
+
+CONCEPT_TOOLTIPS = {
+    "quality_score": "Composite 0–100 score blending all five categories, ranked vs peers. Higher = stronger fundamentals relative to the group.",
+    "composite_score": "Ranking score = quality score minus a penalty for each red flag. This is what orders the leaderboard.",
+    "red_flags": "Rule-based forensic warnings (earnings-quality, financial, governance). More flags = more caution warranted.",
+    "data_completeness": "How many core metrics were actually available for this stock. Low completeness = treat the score with less confidence.",
+    "data_warning": "Figures that look distorted or implausible (e.g. negative equity, extreme P/E, merger-driven jumps) — verify against filings.",
+    "outperform_proba": "Model's estimated probability the stock beats its benchmark. Only meaningful once trained on realized forward returns.",
+    "scored_vs": "Whether this stock was ranked against its sector peers or the whole universe.",
+}
+
+
 def explain_score(row, config=METRIC_CONFIG, top_n=5):
     """
     Explain why a scored row got its quality_score.

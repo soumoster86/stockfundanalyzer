@@ -17,7 +17,8 @@ import streamlit as st
 from src.quality_score import (compute_quality_score, score_label, METRIC_CONFIG,
                                explain_score, explanation_sentence,
                                build_config, DEFAULT_CATEGORY_WEIGHTS,
-                               quality_history, ticker_trend)
+                               quality_history, ticker_trend,
+                               METRIC_TOOLTIPS, CATEGORY_TOOLTIPS, CONCEPT_TOOLTIPS)
 from src.red_flags import detect_red_flags, REASON_TEXT
 from src.model import (make_label, train_outperformance_model, predict_proba)
 from src.ranking import rank_universe
@@ -237,8 +238,9 @@ st.sidebar.subheader("⚖️ Scoring weights")
 preset = st.sidebar.selectbox(
     "Preset", ["Balanced (default)", "Value tilt", "Quality tilt",
                "Growth tilt", "Safety tilt", "Custom"],
-    help="Pick a preset emphasis, or choose Custom and set sliders below.",
-)
+    help="Quickly bias the score toward a style: Value favours cheap stocks, "
+         "Quality favours profitability/strength, Growth favours expansion, "
+         "Safety favours balance-sheet resilience. Pick Custom to set sliders yourself.")
 PRESETS = {
     "Value tilt":   {"Valuation": 0.40, "Profitability": 0.20, "Financial Performance": 0.15,
                      "Financial Strength": 0.15, "Shareholder Metrics": 0.10},
@@ -262,6 +264,7 @@ for cat in DEFAULT_CATEGORY_WEIGHTS:
         cat, 0.0, 1.0, float(base_weights.get(cat, DEFAULT_CATEGORY_WEIGHTS[cat])), 0.05,
         disabled=(preset != "Custom"),
         key=f"w_{cat}",
+        help=CATEGORY_TOOLTIPS.get(cat),
     )
 total_w = sum(weights.values())
 if total_w > 0:
@@ -294,9 +297,10 @@ _n_sectors = data["sector"].nunique() if "sector" in data.columns else 0
 _avg_q = data["quality_score"].mean() if "quality_score" in data.columns else float("nan")
 _warned = int(data["data_warning"].sum()) if "data_warning" in data.columns else 0
 b1, b2, b3, b4 = st.columns(4)
-b1.metric("Universe", f"{_n_stocks:,} stocks")
-b2.metric("Sectors", _n_sectors if _n_sectors else "—")
-b3.metric("Avg quality", f"{_avg_q:.1f}" if pd.notna(_avg_q) else "—")
+b1.metric("Universe", f"{_n_stocks:,} stocks", help="Number of unique stocks loaded and scored.")
+b2.metric("Sectors", _n_sectors if _n_sectors else "—", help="Distinct sectors represented in the data.")
+b3.metric("Avg quality", f"{_avg_q:.1f}" if pd.notna(_avg_q) else "—",
+          help="Mean quality score across the universe (0–100).")
 b4.metric("Data warnings", _warned,
           help="Stocks with distorted/implausible figures flagged for manual review.")
 st.divider()
@@ -308,7 +312,9 @@ tab1, tab2, tab_compare, tab_sector, tab3 = st.tabs(
 # ----------------------------------------------------------------- Tab 1
 with tab1:
     tickers = sorted(data["ticker"].unique())
-    tk = st.selectbox("Select stock", tickers)
+    tk = st.selectbox("Select stock", tickers,
+                      help="Choose a stock to see its quality score, category breakdown, "
+                           "trend, and red flags.")
     latest = data[data["ticker"] == tk].sort_values("date").iloc[-1]
 
     qscore = float(latest["quality_score"]) if pd.notna(latest["quality_score"]) else 0.0
@@ -346,11 +352,14 @@ with tab1:
         st.markdown(quality_gauge_svg(qscore), unsafe_allow_html=True)
     with mcol:
         c2, c3 = st.columns(2)
-        c2.metric("Red Flags", int(latest["red_flag_count"]))
+        c2.metric("Red Flags", int(latest["red_flag_count"]),
+                  help=CONCEPT_TOOLTIPS["red_flags"])
         if "outperform_proba" in data.columns:
-            c3.metric("Outperform Prob.", f"{latest['outperform_proba']*100:.0f}%")
+            c3.metric("Outperform Prob.", f"{latest['outperform_proba']*100:.0f}%",
+                      help=CONCEPT_TOOLTIPS["outperform_proba"])
         else:
-            c3.metric("Quality Score", f"{qscore:.1f}", score_label(qscore))
+            c3.metric("Quality Score", f"{qscore:.1f}", score_label(qscore),
+                      help=CONCEPT_TOOLTIPS["quality_score"])
         sector_txt = latest.get("sector", "Unknown") if "sector" in latest else "Unknown"
         scored_vs = latest.get("scored_vs", "all stocks (by date)")
         st.caption(f"Sector: **{sector_txt}** · Scored vs **{scored_vs}**")
@@ -380,18 +389,30 @@ with tab1:
 
     if ex["drivers"]:
         col_up, col_down = st.columns(2)
+        expl_cfg = {
+            "Metric": st.column_config.TextColumn("Metric", help="The fundamental metric (hover the glossary below for definitions)."),
+            "Percentile": st.column_config.NumberColumn("Percentile", format="%.0f",
+                help="How this stock ranks vs its comparison group, 0–100. Higher = better; valuation metrics are inverted so cheaper ranks higher."),
+            "Value": st.column_config.NumberColumn("Value", help="The raw underlying value of the metric."),
+        }
         with col_up:
             st.markdown("**🟢 Top strengths** (vs peers)")
             up_df = pd.DataFrame(ex["drivers"])[["metric", "percentile", "raw_value"]]
             up_df.columns = ["Metric", "Percentile", "Value"]
-            st.dataframe(up_df, hide_index=True, use_container_width=True)
+            st.dataframe(up_df, hide_index=True, use_container_width=True, column_config=expl_cfg)
         with col_down:
             st.markdown("**🔴 Weakest areas** (vs peers)")
             dn_df = pd.DataFrame(ex["drags"])[["metric", "percentile", "raw_value"]]
             dn_df.columns = ["Metric", "Percentile", "Value"]
-            st.dataframe(dn_df, hide_index=True, use_container_width=True)
+            st.dataframe(dn_df, hide_index=True, use_container_width=True, column_config=expl_cfg)
         st.caption("Percentile = how this stock ranks against its comparison group "
                    "(100 = best). Valuation metrics are inverted so cheaper = higher percentile.")
+        with st.expander("📖 Metric glossary — what each metric means"):
+            from src.quality_score import METRIC_LABELS
+            gloss = pd.DataFrame(
+                [{"Metric": METRIC_LABELS.get(k, k), "Meaning": v}
+                 for k, v in METRIC_TOOLTIPS.items()])
+            st.dataframe(gloss, hide_index=True, use_container_width=True)
 
     st.subheader("Category Scores")
     cat_score_map = {}
@@ -406,7 +427,8 @@ with tab1:
         with rc2:
             for c, v in cat_score_map.items():
                 vv = 0 if pd.isna(v) else float(v)
-                st.markdown(f"**{CATEGORY_SHORT[c]}** · {vv:.0f}")
+                st.metric(CATEGORY_SHORT[c], f"{vv:.0f}",
+                          help=CATEGORY_TOOLTIPS.get(c))
                 st.progress(min(1.0, vv / 100.0))
     else:
         st.caption("No category scores available.")
@@ -455,14 +477,19 @@ with tab1:
 with tab2:
     st.subheader("Multi-Factor Ranking")
     st.caption("Each stock's most recent fiscal-year figures, ranked together.")
-    wq = st.slider("Weight: Quality Score", 0.0, 1.0, 0.5, 0.05)
+    wq = st.slider("Weight: Quality Score", 0.0, 1.0, 0.5, 0.05,
+                   help="How much the composite ranking leans on the fundamental quality "
+                        "score vs the ML outperformance probability. At 1.0 the ranking is "
+                        "pure quality; lower values blend in the model (only meaningful once trained).")
     ranked = rank_universe(data, w_quality=wq, w_ml=1 - wq, as_of_date=None)
 
     # ---- summary cards ----
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Stocks ranked", len(ranked))
-    m2.metric("Top score", f"{ranked['composite_score'].max():.1f}")
-    m3.metric("Median", f"{ranked['composite_score'].median():.1f}")
+    m1.metric("Stocks ranked", len(ranked), help="Total stocks in the current ranking.")
+    m2.metric("Top score", f"{ranked['composite_score'].max():.1f}",
+              help=CONCEPT_TOOLTIPS["composite_score"])
+    m3.metric("Median", f"{ranked['composite_score'].median():.1f}",
+              help="Median composite score — the middle of the pack.")
     if "data_warning" in ranked.columns:
         m4.metric("Data warnings", int(ranked["data_warning"].sum()),
                   help="Stocks with distorted/implausible figures — verify manually.")
@@ -490,12 +517,14 @@ with tab2:
     search = r1c1.text_input("Search ticker", "", placeholder="e.g. TCS").strip().upper()
     if has_sector_col:
         sectors = ["All sectors"] + sorted(ranked["sector"].dropna().unique().tolist())
-        sector_pick = r1c2.selectbox("Sector", sectors)
+        sector_pick = r1c2.selectbox("Sector", sectors,
+            help="Filter the ranking to one sector. With sector scoring on, stocks are ranked against sector peers.")
     else:
         sector_pick = "All sectors"
 
     r2c1, r2c2, r2c3, r2c4 = st.columns([1, 1, 1.3, 1])
-    flag_filter = r2c1.selectbox("Flags", ["All", "No red flags", "Has red flags"])
+    flag_filter = r2c1.selectbox("Flags", ["All", "No red flags", "Has red flags"],
+        help="Filter by forensic red flags. 'No red flags' shows only clean names.")
     rel_filter = r2c2.selectbox("Data", ["All", "Reliable only", "Warnings only"],
                                 help="'Reliable only' hides stocks with data-quality warnings.")
     sort_opts = {
@@ -506,8 +535,10 @@ with tab2:
         "Debt/Equity (low→high)": ("debt_to_equity", True),
         "Revenue growth": ("revenue_growth", False),
     }
-    sort_by = r2c3.selectbox("Sort by", list(sort_opts.keys()))
-    top_n = r2c4.selectbox("Show", ["Top 25", "Top 50", "Top 100", "All"], index=1)
+    sort_by = r2c3.selectbox("Sort by", list(sort_opts.keys()),
+        help="Reorder the table by any metric. Rank uses the composite score.")
+    top_n = r2c4.selectbox("Show", ["Top 25", "Top 50", "Top 100", "All"], index=1,
+        help="Limit how many rows render. Fewer rows = faster on a 2,000+ stock universe.")
 
     view = ranked.copy()
     if search:
@@ -560,25 +591,29 @@ with tab2:
 
     # ---- column config: progress bars for scores ----
     colcfg = {
-        "rank": st.column_config.NumberColumn("#", width="small"),
-        "ticker": st.column_config.TextColumn("Ticker", width="small"),
+        "rank": st.column_config.NumberColumn("#", width="small", help="Position in the ranking."),
+        "ticker": st.column_config.TextColumn("Ticker", width="small", help="Stock symbol (NSE)."),
         "composite_score": st.column_config.ProgressColumn(
-            "Score", min_value=0, max_value=100, format="%.1f"),
+            "Score", min_value=0, max_value=100, format="%.1f",
+            help=CONCEPT_TOOLTIPS["composite_score"]),
         "quality_score": st.column_config.ProgressColumn(
-            "Quality", min_value=0, max_value=100, format="%.1f"),
-        "roe": st.column_config.NumberColumn("ROE", format="%.1f"),
-        "pe": st.column_config.NumberColumn("P/E", format="%.1f"),
-        "debt_to_equity": st.column_config.NumberColumn("D/E", format="%.2f"),
-        "net_margin": st.column_config.NumberColumn("Net%", format="%.1f"),
-        "revenue_growth": st.column_config.NumberColumn("Rev gr%", format="%.1f"),
-        "red_flag_count": st.column_config.TextColumn("Flags", width="small"),
-        "data_fields_present": st.column_config.TextColumn("Data", width="small"),
-        "data_warning_count": st.column_config.TextColumn("⚠", width="small"),
+            "Quality", min_value=0, max_value=100, format="%.1f",
+            help=CONCEPT_TOOLTIPS["quality_score"]),
+        "roe": st.column_config.NumberColumn("ROE", format="%.1f", help=METRIC_TOOLTIPS["roe"]),
+        "pe": st.column_config.NumberColumn("P/E", format="%.1f", help=METRIC_TOOLTIPS["pe"]),
+        "debt_to_equity": st.column_config.NumberColumn("D/E", format="%.2f", help=METRIC_TOOLTIPS["debt_to_equity"]),
+        "net_margin": st.column_config.NumberColumn("Net%", format="%.1f", help=METRIC_TOOLTIPS["net_margin"]),
+        "revenue_growth": st.column_config.NumberColumn("Rev gr%", format="%.1f", help=METRIC_TOOLTIPS["revenue_growth"]),
+        "red_flag_count": st.column_config.TextColumn("Flags", width="small", help=CONCEPT_TOOLTIPS["red_flags"]),
+        "data_fields_present": st.column_config.TextColumn("Data", width="small", help=CONCEPT_TOOLTIPS["data_completeness"]),
+        "data_warning_count": st.column_config.TextColumn("⚠", width="small", help=CONCEPT_TOOLTIPS["data_warning"]),
     }
     if has_sector_col:
-        colcfg["sector"] = st.column_config.TextColumn("Sector", width="medium")
+        colcfg["sector"] = st.column_config.TextColumn("Sector", width="medium",
+                                                       help=CONCEPT_TOOLTIPS["scored_vs"])
     if "outperform_proba" in disp.columns:
-        colcfg["outperform_proba"] = st.column_config.NumberColumn("Outperf.", format="%.0f%%")
+        colcfg["outperform_proba"] = st.column_config.NumberColumn(
+            "Outperf.", format="%.0f%%", help=CONCEPT_TOOLTIPS["outperform_proba"])
 
     showing_txt = (f"Showing {len(disp)} of {total_matched} matched"
                    + (f" ({len(ranked)} total)" if total_matched != len(ranked) else ""))
@@ -600,6 +635,8 @@ with tab_compare:
     st.caption("Pick 2–5 stocks to see their scores, categories, and key metrics side by side.")
     all_tickers = sorted(data["ticker"].str.replace(".NS", "", regex=False).unique())
     picks = st.multiselect("Stocks to compare", all_tickers, max_selections=5,
+                           help="Pick up to 5 stocks to see their category radars and "
+                                "key metrics side by side.",
                            default=all_tickers[:3] if len(all_tickers) >= 3 else all_tickers)
     if len(picks) < 2:
         st.info("Select at least two stocks to compare.")
@@ -624,7 +661,8 @@ with tab_compare:
                             unsafe_allow_html=True)
                 q = row.get("quality_score")
                 st.metric("Quality", f"{q:.1f}" if pd.notna(q) else "—",
-                          score_label(q) if pd.notna(q) else "")
+                          score_label(q) if pd.notna(q) else "",
+                          help=CONCEPT_TOOLTIPS["quality_score"])
 
         # side-by-side metric table
         st.markdown("**Metrics side by side**")
@@ -736,7 +774,10 @@ with tab3:
         algo_opts.insert(0, "lightgbm")
     if HAS_XGB:
         algo_opts.append("xgboost")
-    kind = st.selectbox("Algorithm", algo_opts)
+    kind = st.selectbox("Algorithm", algo_opts,
+                        help="Which model to train. RandomForest is always available; "
+                             "LightGBM/XGBoost appear only if installed. All predict the "
+                             "probability of beating the benchmark.")
     if not (HAS_LGBM or HAS_XGB):
         st.caption("ℹ️ LightGBM/XGBoost aren't installed in this deployment — using "
                    "scikit-learn RandomForest. (They're excluded from requirements.txt "
