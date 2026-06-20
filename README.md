@@ -3,6 +3,12 @@
 A self-learning fundamental analysis tool: Quality Score Engine + global ML
 outperformance model + multi-factor ranking + forensic red-flag detection.
 
+## Branding
+
+The app logo lives in `assets/` (`logo.svg` vector + `logo.png` raster). It's
+wired into the Streamlit page icon (browser tab), the login header, and the main
+app header. To restyle, edit `assets/logo.svg` and re-export the PNG.
+
 ## Quick start
 
 ```bash
@@ -157,6 +163,28 @@ Notes:
   forward-return labels exist anyway).
 - Public Community Cloud apps are visible to anyone with the link; don't commit
   anything sensitive.
+
+## Institutional scores (Piotroski F & Altman Z)
+
+Two established, *absolute* measures (unlike the relative Quality Score),
+in `src/institutional_scores.py`:
+
+**Piotroski F-Score (0–9)** — nine binary financial-health tests: positive net
+income, positive operating cash flow, ROA improvement, clean accruals, lower
+leverage, better current ratio, no dilution, better gross margin, better asset
+turnover. 7–9 strong, 4–6 moderate, 0–3 weak. Shown on the Single Stock Report
+(with a test-by-test breakdown) and as an "F" column in the ranking. A light
+15% blend feeds a `quality_plus` column without overwriting the base score.
+
+**Altman Z-Score** — bankruptcy-risk formula, especially useful for small caps
+and cyclicals. Traffic light: 🟢 > 3 safe · 🟡 1.8–3 grey zone · 🔴 < 1.8
+distress. Shown on the Single Stock Report and as a "Z" column in the ranking.
+
+**Data note:** the F-Score computes ~7/9 tests from the original fetch; the
+ROA/asset-turnover tests and the *entire* Z-Score need extra balance-sheet
+fields (total assets/liabilities, current assets/liabilities, retained earnings,
+EBIT, market cap). The updated `fetch_fundamentals.py` now captures these — so
+**re-run the fetcher** to enable full F-Scores and Z-Scores.
 
 ## How the pieces fit
 

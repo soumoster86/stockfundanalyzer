@@ -39,6 +39,9 @@ OUTPUT_COLUMNS = [
     "pe", "pb", "ev_ebitda", "peg", "price_sales",
     "net_profit", "operating_cash_flow", "receivables", "revenue", "shares_outstanding",
     "total_debt", "auditor", "promoter_pledge_pct", "insider_net_buy", "related_party_txn_flag",
+    # extra raw balance-sheet items for Piotroski F-Score & Altman Z-Score
+    "total_assets", "total_liabilities", "current_assets", "current_liabilities",
+    "retained_earnings", "ebit", "market_cap",
     "fwd_return", "bench_fwd_return",
 ]
 
@@ -112,6 +115,12 @@ def fetch_one(ticker: str, date_str: str) -> list:
         if pd.notna(total_assets) and pd.notna(cur_liab):
             capital_employed = total_assets - cur_liab
 
+        total_liabilities = _safe(bs, ["Total Liabilities Net Minority Interest",
+                                        "Total Liabilities", "Total Liab"], ycol)
+        retained_earnings = _safe(bs, ["Retained Earnings"], ycol)
+        # market cap is point-in-time (from info), only attach to the latest year
+        market_cap = info.get("marketCap", np.nan) if i == 0 else np.nan
+
         op_cf = _safe(cf, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"], ycol)
         capex = _safe(cf, ["Capital Expenditure"], ycol)
         fcf = _safe(cf, ["Free Cash Flow"], ycol)
@@ -159,6 +168,13 @@ def fetch_one(ticker: str, date_str: str) -> list:
             revenue=revenue,
             shares_outstanding=shares,
             total_debt=total_debt,
+            total_assets=total_assets,
+            total_liabilities=total_liabilities,
+            current_assets=cur_assets,
+            current_liabilities=cur_liab,
+            retained_earnings=retained_earnings,
+            ebit=op_income,  # operating income ≈ EBIT for the Z-score
+            market_cap=market_cap,
         ))
         rows.append(row)
 

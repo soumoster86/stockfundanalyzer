@@ -23,6 +23,10 @@ from src.red_flags import detect_red_flags, REASON_TEXT
 from src.model import (make_label, train_outperformance_model, predict_proba)
 from src.ranking import rank_universe
 from src.data_quality import (data_completeness, data_sanity_flags, WARNING_TEXT)
+from src.institutional_scores import (compute_piotroski, compute_altman_z,
+                                      f_score_band, z_band, Z_BAND_TEXT,
+                                      PIOTROSKI_LABELS, PIOTROSKI_TESTS,
+                                      blend_with_quality)
 from src.sample_data import sample_csv_bytes, sample_dataframe, COLUMN_DOCS
 from src.auth import login_gate, logout_button
 
@@ -137,6 +141,9 @@ def enrich(df, use_sector=False, config=METRIC_CONFIG):
     df, _flag_cols = detect_red_flags(df)
     df, _warn_cols = data_sanity_flags(df)
     df = data_completeness(df)
+    # Piotroski F-Score also needs the multi-year panel (year-over-year tests),
+    # so compute it before collapsing to the latest row.
+    df = compute_piotroski(df)
     # Keep the latest row per ticker that clears a minimum completeness bar, so a
     # stock whose newest fiscal row is mostly empty (e.g. not-yet-fully-reported)
     # falls back to its last substantially-populated year rather than ranking on a
@@ -155,6 +162,8 @@ def enrich(df, use_sector=False, config=METRIC_CONFIG):
             df = pd.concat([latest_good, rest], ignore_index=True)
         else:
             df = latest_good
+    # Altman Z-Score is point-in-time -> compute on the latest cross-section.
+    df = compute_altman_z(df)
     # Stocks may have different fiscal-end dates; for a fair cross-sectional
     # comparison they must all be ranked together, not split into tiny per-date
     # groups. Use a single snapshot key (optionally sector) instead of raw date.
@@ -163,6 +172,8 @@ def enrich(df, use_sector=False, config=METRIC_CONFIG):
     group = ("_snapshot", "sector") if (use_sector and "sector" in df.columns) else ("_snapshot",)
     df = compute_quality_score(df, group_cols=group, config=config)
     df = df.drop(columns=["_snapshot"], errors="ignore")
+    # Light blend of F-Score into a "quality_plus" column (does not overwrite quality_score)
+    df = blend_with_quality(df)
     return df
 
 
@@ -389,6 +400,48 @@ with tab1:
         scored_vs = latest.get("scored_vs", "all stocks (by date)")
         st.caption(f"Sector: **{sector_txt}** · Scored vs **{scored_vs}**")
 
+    # ---- Institutional scores: Piotroski F & Altman Z ----
+    fcol, zcol = st.columns(2)
+    with fcol:
+        fs = latest.get("f_score")
+        ftu = int(latest.get("f_tests_used", 0)) if pd.notna(latest.get("f_tests_used", 0)) else 0
+        if pd.notna(fs) and ftu > 0:
+            st.metric(f"Piotroski F-Score", f"{int(fs)} / 9",
+                      f_score_band(fs, ftu),
+                      help="Nine binary financial-health tests (profitability, leverage/"
+                           "liquidity, efficiency). 7–9 strong, 4–6 moderate, 0–3 weak. "
+                           "Institutional investors use it to spot improving fundamentals.")
+            if ftu < 9:
+                st.caption(f"⚠️ Computed from {ftu}/9 tests "
+                           "(missing inputs — re-fetch for total-assets-based tests).")
+            with st.expander("F-Score test breakdown"):
+                for t in PIOTROSKI_TESTS:
+                    v = latest.get(t)
+                    if pd.isna(v):
+                        st.write(f"➖ {PIOTROSKI_LABELS[t]} — *not evaluable*")
+                    elif v >= 1:
+                        st.write(f"✅ {PIOTROSKI_LABELS[t]}")
+                    else:
+                        st.write(f"❌ {PIOTROSKI_LABELS[t]}")
+        else:
+            st.metric("Piotroski F-Score", "N/A",
+                      help="Needs at least two years of data with net income, cash flow, "
+                           "margins, etc.")
+    with zcol:
+        zs = latest.get("z_score")
+        zb = z_band(zs)
+        if pd.notna(zs):
+            emoji = {"Green": "🟢", "Yellow": "🟡", "Red": "🔴"}.get(zb, "")
+            st.metric("Altman Z-Score", f"{zs:.2f}", f"{emoji} {zb}",
+                      help="Bankruptcy-risk score. 🟢 > 3 safe · 🟡 1.8–3 grey zone · "
+                           "🔴 < 1.8 distress. Especially useful for small caps and cyclicals.")
+            st.caption(Z_BAND_TEXT.get(zb, ""))
+        else:
+            st.metric("Altman Z-Score", "N/A",
+                      help="Needs balance-sheet inputs (total assets/liabilities, retained "
+                           "earnings, EBIT, market cap). Re-fetch with the updated fetcher to enable.")
+            st.caption("Re-run the fetcher to capture the balance-sheet fields this needs.")
+
     # ---- Data quality ----
     present = int(latest.get("data_fields_present", 0))
     total = int(latest.get("data_fields_total", 0))
@@ -595,13 +648,19 @@ with tab2:
     if "outperform_proba" in view.columns:
         candidate_cols.append("outperform_proba")
     candidate_cols += ["roe", "pe", "debt_to_equity", "net_margin",
-                       "revenue_growth", "red_flag_count",
+                       "revenue_growth", "f_score", "z_band", "red_flag_count",
                        "data_fields_present", "data_warning_count"]
     show = [c for c in candidate_cols if c in view.columns]
     disp = view[show].reset_index(drop=True).copy()
     disp["ticker"] = disp["ticker"].str.replace(".NS", "", regex=False)
     if "revenue_growth" in disp.columns:
         disp["revenue_growth"] = disp["revenue_growth"] * 100.0
+    if "f_score" in disp.columns:
+        disp["f_score"] = disp["f_score"].apply(
+            lambda x: f"{int(x)}" if pd.notna(x) else "–")
+    if "z_band" in disp.columns:
+        disp["z_band"] = disp["z_band"].map(
+            {"Green": "🟢", "Yellow": "🟡", "Red": "🔴", "N/A": "–"}).fillna("–")
     if "data_fields_present" in disp.columns and "data_fields_total" in view.columns:
         tot = int(view["data_fields_total"].iloc[0]) if len(view) else 0
         disp["data_fields_present"] = disp["data_fields_present"].apply(
@@ -629,6 +688,10 @@ with tab2:
         "debt_to_equity": st.column_config.NumberColumn("D/E", format="%.2f", help=METRIC_TOOLTIPS["debt_to_equity"]),
         "net_margin": st.column_config.NumberColumn("Net%", format="%.1f", help=METRIC_TOOLTIPS["net_margin"]),
         "revenue_growth": st.column_config.NumberColumn("Rev gr%", format="%.1f", help=METRIC_TOOLTIPS["revenue_growth"]),
+        "f_score": st.column_config.TextColumn("F", width="small",
+            help="Piotroski F-Score (0–9). Financial-health checklist; higher = stronger fundamentals."),
+        "z_band": st.column_config.TextColumn("Z", width="small",
+            help="Altman Z-Score bankruptcy risk: 🟢 safe · 🟡 grey zone · 🔴 distress."),
         "red_flag_count": st.column_config.TextColumn("Flags", width="small", help=CONCEPT_TOOLTIPS["red_flags"]),
         "data_fields_present": st.column_config.TextColumn("Data", width="small", help=CONCEPT_TOOLTIPS["data_completeness"]),
         "data_warning_count": st.column_config.TextColumn("⚠", width="small", help=CONCEPT_TOOLTIPS["data_warning"]),
