@@ -1,0 +1,9 @@
+# Optional local extras for stronger / faster outperformance models.
+# Not installed on Streamlit Community Cloud (keeps free-tier builds light).
+#
+#   pip install -r requirements-ml.txt
+#
+# RandomForest (scikit-learn, already in requirements.txt) always works without these.
+
+lightgbm>=4.0
+xgboost>=2.0
