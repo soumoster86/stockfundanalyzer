@@ -1,27 +1,25 @@
 """
-Institutional Scores: Piotroski F-Score & Altman Z-Score
---------------------------------------------------------
-Two established, absolute (non-relative) measures that complement the
-percentile-based Quality Score.
+Institutional Scores: Piotroski F, Altman Z, Beneish M
+-----------------------------------------------------
+Absolute (non-relative) measures that complement the percentile Quality Score.
 
-Piotroski F-Score (0-9): nine binary financial-health tests across
-profitability, leverage/liquidity, and operating efficiency. Higher = stronger.
-Each test needs the current year and the prior year, so the input must be a
-multi-year panel (>=2 rows per ticker).
+Piotroski F-Score (0-9): nine binary financial-health tests. Higher = stronger.
+Needs a multi-year panel (>=2 rows per ticker) for YoY tests.
 
-Altman Z-Score: a weighted formula estimating bankruptcy risk. Traffic light:
-  Green  (> 2.99) = safe
-  Yellow (1.81-2.99) = grey zone
-  Red    (< 1.81) = distress
+Altman Z-Score: bankruptcy-risk formula.
+  Green  (> 2.99) = safe · Yellow (1.81-2.99) = grey · Red (< 1.81) = distress
 
-Both degrade gracefully: if some inputs are missing, the F-Score reports how
-many of the nine tests could be evaluated, and the Z-Score returns NaN rather
-than a misleading number.
+Beneish M-Score: earnings-manipulation probability model (8-variable form).
+  M > -1.78  →  likely manipulator (red)
+  M ≤ -2.22  →  unlikely (green)
+  in between →  grey zone
+Degrades gracefully when inputs are missing (m_score = NaN).
 """
+
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
 
 # ---------------------------------------------------------------- Piotroski
 # Each test maps to a column we try to populate. Inputs needed (current + prior):
@@ -203,6 +201,141 @@ Z_BAND_TEXT = {
     "Yellow": "Grey zone — some distress risk (Z 1.8–3)",
     "Red": "Distress zone — elevated bankruptcy risk (Z < 1.8)",
     "N/A": "Not computable — missing balance-sheet inputs",
+}
+
+
+# ---------------------------------------------------------------- Beneish M
+# Classic 8-variable model (Beneish 1999). We compute the indices we can from
+# the panel; if fewer than 4 of the 8 indices are available, M is left NaN.
+BENEISH_INDICES = ["dsri", "gmi", "aqi", "sgi", "depi", "sgai", "tata", "lvgi"]
+
+BENEISH_COEF = {
+    "intercept": -4.84,
+    "dsri": 0.920,
+    "gmi": 0.528,
+    "aqi": 0.404,
+    "sgi": 0.892,
+    "depi": 0.115,
+    "sgai": -0.172,
+    "tata": 4.679,
+    "lvgi": -0.327,
+}
+
+
+def _safe_div(n, d):
+    out = n / d
+    if hasattr(out, "replace"):
+        return out.replace([np.inf, -np.inf], np.nan)
+    if np.isscalar(out) and not np.isfinite(out):
+        return np.nan
+    return out
+
+
+def compute_beneish(df, by="ticker", date_col="date", min_indices=4):
+    """
+    Beneish M-Score on a multi-year panel (uses prior year via shift).
+
+    Adds:
+      m_dsri, m_gmi, ...  component indices (when computable)
+      m_score             composite M (NaN if too few components)
+      m_indices_used      count of non-null indices used
+      m_band              Green / Yellow / Red / N/A
+    """
+    d = df.sort_values([by, date_col]).copy() if date_col in df.columns else df.copy()
+
+    def prev(col):
+        return _prev(d, col, by) if col in d.columns else np.nan
+
+    # --- indices ---
+    idx = {}
+
+    # DSRI: (Receivables/Sales)_t / (Receivables/Sales)_{t-1}
+    if {"receivables", "revenue"}.issubset(d.columns):
+        r_s = _safe_div(d["receivables"], d["revenue"])
+        r_s_prev = _safe_div(prev("receivables"), prev("revenue"))
+        idx["dsri"] = _safe_div(r_s, r_s_prev)
+
+    # GMI: GrossMargin_{t-1} / GrossMargin_t  (decline in GM → GMI > 1)
+    if "gross_margin" in d.columns:
+        # margins may be in %; ratio is unit-free either way
+        idx["gmi"] = _safe_div(prev("gross_margin"), d["gross_margin"])
+
+    # AQI: non-current assets quality proxy — needs total_assets + current_assets
+    # AQI = [1 - (CA + PPE)/TA]_t / [1 - (CA + PPE)/TA]_{t-1}
+    # Without PPE we use CA only as a soft proxy when total_assets present.
+    if {"total_assets", "current_assets"}.issubset(d.columns):
+        soft = 1.0 - _safe_div(d["current_assets"], d["total_assets"])
+        soft_prev = 1.0 - _safe_div(prev("current_assets"), prev("total_assets"))
+        idx["aqi"] = _safe_div(soft, soft_prev)
+
+    # SGI: Sales_t / Sales_{t-1}
+    if "revenue" in d.columns:
+        idx["sgi"] = _safe_div(d["revenue"], prev("revenue"))
+
+    # DEPI: depreciation index — skip unless depreciation columns exist
+    if "depreciation" in d.columns and "ppe" in d.columns:
+        dep_rate = _safe_div(d["depreciation"], d["depreciation"] + d["ppe"])
+        dep_rate_prev = _safe_div(prev("depreciation"), prev("depreciation") + prev("ppe"))
+        idx["depi"] = _safe_div(dep_rate_prev, dep_rate)
+
+    # SGAI: SG&A / Sales ratio index
+    if "sga" in d.columns and "revenue" in d.columns:
+        sga_s = _safe_div(d["sga"], d["revenue"])
+        sga_s_prev = _safe_div(prev("sga"), prev("revenue"))
+        idx["sgai"] = _safe_div(sga_s, sga_s_prev)
+
+    # TATA: (Net Income - OCF) / Total Assets  (total accruals)
+    if {"net_profit", "operating_cash_flow"}.issubset(d.columns):
+        accr = d["net_profit"] - d["operating_cash_flow"]
+        if "total_assets" in d.columns:
+            idx["tata"] = _safe_div(accr, d["total_assets"])
+        elif "revenue" in d.columns:
+            # weaker scale fallback
+            idx["tata"] = _safe_div(accr, d["revenue"])
+
+    # LVGI: leverage_t / leverage_{t-1}
+    lev_col = (
+        "total_debt" if "total_debt" in d.columns
+        else ("debt_to_equity" if "debt_to_equity" in d.columns else None)
+    )
+    if lev_col:
+        idx["lvgi"] = _safe_div(d[lev_col], prev(lev_col))
+
+    for name in BENEISH_INDICES:
+        d[f"m_{name}"] = idx.get(name, np.nan)
+
+    # Composite: only where enough indices present
+    used = pd.Series(0, index=d.index, dtype=int)
+    m = pd.Series(BENEISH_COEF["intercept"], index=d.index, dtype=float)
+    for name, coef in BENEISH_COEF.items():
+        if name == "intercept":
+            continue
+        col = f"m_{name}"
+        present = d[col].notna()
+        used = used + present.astype(int)
+        m = m + coef * d[col].fillna(0.0)
+
+    d["m_indices_used"] = used
+    d["m_score"] = np.where(used >= min_indices, m, np.nan)
+    d["m_band"] = d["m_score"].apply(m_band)
+    return d
+
+
+def m_band(m):
+    if pd.isna(m):
+        return "N/A"
+    if m > -1.78:
+        return "Red"       # likely manipulator
+    if m > -2.22:
+        return "Yellow"
+    return "Green"         # unlikely
+
+
+M_BAND_TEXT = {
+    "Green": "Unlikely earnings manipulator (M ≤ −2.22)",
+    "Yellow": "Grey zone (−2.22 < M ≤ −1.78) — review accruals",
+    "Red": "Likely manipulator (M > −1.78) — forensic review recommended",
+    "N/A": "Not computable — need multi-year receivables/revenue/margins (and ideally total assets)",
 }
 
 

@@ -16,24 +16,33 @@ UI = ROOT / "ui"
 
 SRC_MODULES = [
     "auth",
+    "build_labels",
     "data_quality",
     "enrich",
     "flag_lists",
+    "governance",
     "institutional_scores",
     "model",
+    "peers",
     "quality_score",
     "ranking",
     "red_flags",
     "sample_data",
+    "schema",
+    "screens",
+    "watchlist",
 ]
 
 UI_PY = [
     UI / "gauges.py",
+    UI / "theme.py",
     UI / "tabs" / "report.py",
     UI / "tabs" / "ranking.py",
     UI / "tabs" / "compare.py",
     UI / "tabs" / "sector.py",
     UI / "tabs" / "train.py",
+    UI / "tabs" / "watchlist_page.py",
+    UI / "tabs" / "tutorial.py",
 ]
 
 
@@ -84,13 +93,15 @@ def test_app_imports_resolve_from_src_and_ui():
                 names.add(node.target.id)
         src_exports[m] = names
 
-    # ui.tabs re-exports render_* 
+    # ui.tabs re-exports render_*
     ui_tabs_exports = {
         "render_report",
         "render_ranking",
         "render_compare",
         "render_sector",
         "render_train",
+        "render_watchlist",
+        "render_tutorial",
     }
 
     bad = []
@@ -160,7 +171,7 @@ def test_no_duplicate_static_widget_keys():
 def test_third_party_imports_installable():
     local_roots = {"src", "app", "ui"}
     stdlib = set(sys.stdlib_module_names)
-    optional = {"lightgbm", "xgboost", "yfinance"}
+    optional = {"lightgbm", "xgboost", "yfinance"}  # optional local extras
     third_party = set()
     paths = [APP] + [SRC / f"{m}.py" for m in SRC_MODULES] + UI_PY
     for path in paths:

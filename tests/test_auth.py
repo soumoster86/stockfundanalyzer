@@ -1,5 +1,5 @@
 """Auth: PBKDF2 hashing, constant-time verify, credential checks."""
-from src.auth import hash_password, verify_password, check_credentials, PBKDF2_ITERATIONS
+from src.auth import PBKDF2_ITERATIONS, check_credentials, hash_password, verify_password
 
 
 def test_hash_verify_roundtrip():

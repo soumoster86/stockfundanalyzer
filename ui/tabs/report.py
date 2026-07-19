@@ -5,40 +5,113 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from src.data_quality import WARNING_TEXT
+from src.institutional_scores import (
+    M_BAND_TEXT,
+    PIOTROSKI_LABELS,
+    PIOTROSKI_TESTS,
+    Z_BAND_TEXT,
+    f_score_band,
+    m_band,
+    z_band,
+)
+from src.peers import peer_context_line, sector_peers
 from src.quality_score import (
+    CATEGORY_TOOLTIPS,
+    CONCEPT_TOOLTIPS,
     METRIC_CONFIG,
+    METRIC_LABELS,
+    METRIC_TOOLTIPS,
     explain_score,
     explanation_sentence,
     score_label,
     ticker_trend,
-    METRIC_TOOLTIPS,
-    CATEGORY_TOOLTIPS,
-    CONCEPT_TOOLTIPS,
-    METRIC_LABELS,
 )
 from src.red_flags import REASON_TEXT
-from src.data_quality import WARNING_TEXT
-from src.institutional_scores import (
-    f_score_band,
-    z_band,
-    Z_BAND_TEXT,
-    PIOTROSKI_LABELS,
-    PIOTROSKI_TESTS,
+from src.watchlist import add_ticker, is_watched, remove_ticker
+from ui.gauges import CATEGORY_SHORT, category_radar_svg, quality_gauge_svg
+from ui.theme import (
+    badge,
+    badge_row,
+    ok_banner,
+    peers_html_table,
+    quality_color,
+    red_flag_block,
+    render_f_score_breakdown,
+    score_card,
+    section,
 )
-from ui.gauges import category_radar_svg, quality_gauge_svg, CATEGORY_SHORT
 
 
 def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config) -> None:
     tickers = sorted(data["ticker"].unique())
+    # Only force the selectbox when another page requests a jump (ranking /
+    # watchlist / peers). Overwriting report_ticker_select every run from
+    # report_ticker was locking the dropdown on the previous value.
+    if st.session_state.pop("_report_jump", None):
+        pref = st.session_state.get("report_ticker")
+        if pref in tickers:
+            st.session_state["report_ticker_select"] = pref
+    if (
+        "report_ticker_select" not in st.session_state
+        or st.session_state["report_ticker_select"] not in tickers
+    ):
+        st.session_state["report_ticker_select"] = tickers[0]
+
     tk = st.selectbox(
         "Select stock",
         tickers,
+        key="report_ticker_select",
         help="Choose a stock to see its quality score, category breakdown, "
-             "trend, and red flags.",
+             "trend, and red flags. Tip: open a name from Universe Ranking.",
     )
+    st.session_state["report_ticker"] = tk
     latest = data[data["ticker"] == tk].sort_values("date").iloc[-1]
 
     qscore = float(latest["quality_score"]) if pd.notna(latest["quality_score"]) else 0.0
+    q_label = score_label(qscore)
+    n_flags = int(latest["red_flag_count"]) if pd.notna(latest.get("red_flag_count")) else 0
+    fs = latest.get("f_score")
+    ftu = (
+        int(latest.get("f_tests_used", 0))
+        if pd.notna(latest.get("f_tests_used", 0))
+        else 0
+    )
+    f_band_lbl = f_score_band(fs, ftu) if pd.notna(fs) and ftu > 0 else "N/A"
+    zs = latest.get("z_score")
+    zb = z_band(zs)
+    ms = latest.get("m_score")
+    mb = latest.get("m_band") if "m_band" in latest.index else m_band(ms)
+    miu = (
+        int(latest.get("m_indices_used", 0))
+        if pd.notna(latest.get("m_indices_used", 0))
+        else 0
+    )
+
+    # Watchlist toggle
+    wl_col, _ = st.columns([1, 3])
+    with wl_col:
+        if is_watched(st.session_state, tk):
+            if st.button("⭐ On watchlist — remove", key="rpt_wl_rm"):
+                remove_ticker(st.session_state, tk)
+                st.rerun()
+        else:
+            if st.button("☆ Add to watchlist", key="rpt_wl_add"):
+                add_ticker(st.session_state, tk)
+                st.rerun()
+
+    # Status badge strip
+    badge_items = [
+        (f"Quality {q_label}", q_label if q_label != "N/A" else "N/A"),
+        (
+            f"{n_flags} red flag{'s' if n_flags != 1 else ''}",
+            "Red" if n_flags else "Green",
+        ),
+        (f"F: {f_band_lbl}", f_band_lbl if f_band_lbl != "N/A" else "N/A"),
+        (f"Z: {zb}", zb if zb else "N/A"),
+        (f"M: {mb if mb else 'N/A'}", mb if mb else "N/A"),
+    ]
+    st.markdown(badge_row(badge_items), unsafe_allow_html=True)
 
     gcol, mcol = st.columns([1, 2])
     with gcol:
@@ -47,7 +120,7 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
         c2, c3 = st.columns(2)
         c2.metric(
             "Red Flags",
-            int(latest["red_flag_count"]),
+            n_flags,
             help=CONCEPT_TOOLTIPS["red_flags"],
         )
         if "outperform_proba" in data.columns and pd.notna(latest.get("outperform_proba")):
@@ -60,72 +133,98 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
             c3.metric(
                 "Quality Score",
                 f"{qscore:.1f}",
-                score_label(qscore),
+                q_label,
                 help=CONCEPT_TOOLTIPS["quality_score"],
             )
         sector_txt = latest.get("sector", "Unknown") if "sector" in latest.index else "Unknown"
         scored_vs = latest.get("scored_vs", "all stocks (by date)")
-        st.caption(f"Sector: **{sector_txt}** · Scored vs **{scored_vs}**")
-
-    # ---- Institutional scores ----
-    fcol, zcol = st.columns(2)
-    with fcol:
-        fs = latest.get("f_score")
-        ftu = (
-            int(latest.get("f_tests_used", 0))
-            if pd.notna(latest.get("f_tests_used", 0))
-            else 0
+        st.caption(
+            f"Sector: **{sector_txt}** · Scored vs **{scored_vs}** · "
+            f"{peer_context_line(data, tk)}"
         )
+
+    # ---- Institutional scores as accent cards ----
+    section("Institutional scores")
+    fcol, zcol, mcol_inst = st.columns(3)
+    with fcol:
         if pd.notna(fs) and ftu > 0:
-            st.metric(
-                "Piotroski F-Score",
-                f"{int(fs)} / 9",
-                f_score_band(fs, ftu),
-                help="Nine binary financial-health tests (profitability, leverage/"
-                     "liquidity, efficiency). 7–9 strong, 4–6 moderate, 0–3 weak.",
+            accent = {"Strong": "#1D9E75", "Moderate": "#378ADD", "Weak": "#E24B4A"}.get(
+                f_band_lbl, "#30363D"
             )
-            if ftu < 9:
-                st.caption(
-                    f"⚠️ Computed from {ftu}/9 tests "
-                    "(missing inputs — re-fetch for total-assets-based tests)."
-                )
-            with st.expander("F-Score test breakdown"):
-                for t in PIOTROSKI_TESTS:
-                    v = latest.get(t)
-                    if pd.isna(v):
-                        st.write(f"➖ {PIOTROSKI_LABELS[t]} — *not evaluable*")
-                    elif v >= 1:
-                        st.write(f"✅ {PIOTROSKI_LABELS[t]}")
-                    else:
-                        st.write(f"❌ {PIOTROSKI_LABELS[t]}")
+            st.markdown(
+                score_card(
+                    "Piotroski F-Score",
+                    f"{int(fs)} / 9",
+                    f"{badge(f_band_lbl, f_band_lbl)}"
+                    + (f" · {ftu}/9 tests" if ftu < 9 else ""),
+                    accent=accent,
+                ),
+                unsafe_allow_html=True,
+            )
         else:
-            st.metric(
-                "Piotroski F-Score",
-                "N/A",
-                help="Needs at least two years of data with net income, cash flow, "
-                     "margins, etc.",
+            st.markdown(
+                score_card("Piotroski F-Score", "N/A", "Need multi-year fundamentals"),
+                unsafe_allow_html=True,
             )
     with zcol:
-        zs = latest.get("z_score")
-        zb = z_band(zs)
         if pd.notna(zs):
-            emoji = {"Green": "🟢", "Yellow": "🟡", "Red": "🔴"}.get(zb, "")
-            st.metric(
-                "Altman Z-Score",
-                f"{zs:.2f}",
-                f"{emoji} {zb}",
-                help="Bankruptcy-risk score. 🟢 > 3 safe · 🟡 1.8–3 grey zone · "
-                     "🔴 < 1.8 distress.",
+            accent = {"Green": "#1D9E75", "Yellow": "#E0A82E", "Red": "#E24B4A"}.get(
+                zb, "#30363D"
             )
-            st.caption(Z_BAND_TEXT.get(zb, ""))
+            st.markdown(
+                score_card(
+                    "Altman Z-Score",
+                    f"{zs:.2f}",
+                    f"{badge(zb, zb)} · {Z_BAND_TEXT.get(zb, '')}",
+                    accent=accent,
+                ),
+                unsafe_allow_html=True,
+            )
         else:
-            st.metric(
-                "Altman Z-Score",
-                "N/A",
-                help="Needs balance-sheet inputs (total assets/liabilities, retained "
-                     "earnings, EBIT, market cap).",
+            st.markdown(
+                score_card(
+                    "Altman Z-Score",
+                    "N/A",
+                    "Need balance-sheet fields (assets, EBIT, mkt cap)",
+                ),
+                unsafe_allow_html=True,
             )
-            st.caption("Re-run the fetcher to capture the balance-sheet fields this needs.")
+    with mcol_inst:
+        if pd.notna(ms):
+            accent = {"Green": "#1D9E75", "Yellow": "#E0A82E", "Red": "#E24B4A"}.get(
+                mb, "#30363D"
+            )
+            sub = f"{badge(str(mb), mb)} · {M_BAND_TEXT.get(mb, '')}"
+            if miu < 8:
+                sub += f" · {miu}/8 indices"
+            st.markdown(
+                score_card("Beneish M-Score", f"{ms:.2f}", sub, accent=accent),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                score_card(
+                    "Beneish M-Score",
+                    "N/A",
+                    M_BAND_TEXT.get("N/A", ""),
+                ),
+                unsafe_allow_html=True,
+            )
+
+    # Full-width visual F-Score breakdown (Streamlit-native + inline styles)
+    if pd.notna(fs) and ftu > 0:
+        with st.expander("F-Score test breakdown", expanded=False):
+            st.caption(
+                "Nine binary health checks in three groups. "
+                "Green = pass · Red = fail · Grey = not enough data."
+            )
+            render_f_score_breakdown(
+                latest,
+                PIOTROSKI_TESTS,
+                PIOTROSKI_LABELS,
+                score=float(fs),
+                tests_used=ftu,
+            )
 
     # ---- Data quality ----
     present = int(latest.get("data_fields_present", 0) or 0)
@@ -139,9 +238,12 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
                 "treat this score with low confidence."
             )
         else:
-            st.caption(
-                f"Data completeness: {present}/{total} core metrics populated "
-                f"({completeness * 100:.0f}%)."
+            st.markdown(
+                f'<p class="sfa-muted">Data completeness: {present}/{total} core metrics '
+                f"({completeness * 100:.0f}%). "
+                f'{badge(f"{completeness * 100:.0f}% complete", "Green" if completeness >= 0.7 else "Yellow")}'
+                f"</p>",
+                unsafe_allow_html=True,
             )
     if isinstance(warnings, list) and warnings:
         st.warning(
@@ -151,7 +253,7 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
             st.write("• " + WARNING_TEXT.get(wkey, wkey))
 
     # ---- Explainability ----
-    st.subheader("Why this score?")
+    section("Why this score?")
     ex = explain_score(latest, config=custom_config)
     st.write(explanation_sentence(ex, ticker=tk))
 
@@ -198,7 +300,7 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
             )
             st.dataframe(gloss, hide_index=True, use_container_width=True)
 
-    st.subheader("Category Scores")
+    section("Category scores")
     cat_score_map = {}
     for c in METRIC_CONFIG:
         col = f"{c.replace(' ', '_').lower()}_score"
@@ -212,12 +314,19 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
             for c, v in cat_score_map.items():
                 vv = 0 if pd.isna(v) else float(v)
                 st.metric(CATEGORY_SHORT[c], f"{vv:.0f}", help=CATEGORY_TOOLTIPS.get(c))
-                st.progress(min(1.0, vv / 100.0))
+                # Colored progress via markdown bar (st.progress is mono)
+                st.markdown(
+                    f'<div style="height:8px;background:#30363D;border-radius:4px;'
+                    f'overflow:hidden;margin:-0.4rem 0 0.6rem 0;">'
+                    f'<div style="width:{min(100, vv):.0f}%;height:100%;'
+                    f'background:{quality_color(vv)};"></div></div>',
+                    unsafe_allow_html=True,
+                )
     else:
         st.caption("No category scores available.")
 
     # ---- Quality trend ----
-    st.subheader("Quality Trend")
+    section("Quality trend")
     trend = ticker_trend(history_panel, tk)
     if trend["direction"] == "insufficient data":
         npts = len(trend["points"])
@@ -264,10 +373,33 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
         if trend.get("caveat"):
             st.caption("⚠️ " + trend["caveat"])
 
-    st.subheader("Red Flags")
+    section("Red flags")
     flags = latest.get("red_flags", [])
     if isinstance(flags, list) and flags:
         for f in flags:
-            st.error(REASON_TEXT.get(f, f))
+            st.markdown(red_flag_block(REASON_TEXT.get(f, f)), unsafe_allow_html=True)
     else:
-        st.success("No red flags detected.")
+        st.markdown(ok_banner("No red flags detected."), unsafe_allow_html=True)
+
+    # ---- Sector peers (colored Z / M badges) ----
+    section("Sector peers")
+    peers, sector = sector_peers(data, tk, n=5)
+    if peers is None or peers.empty or not sector:
+        st.caption("No sector peer group available for this stock.")
+    else:
+        st.caption(
+            f"Top quality names in **{sector}** (excluding this stock). "
+            "Z = bankruptcy risk · M = earnings-manipulation risk · "
+            "🟢 ok · 🟡 caution · 🔴 elevated"
+        )
+        st.markdown(peers_html_table(peers), unsafe_allow_html=True)
+        peer_pick = st.selectbox(
+            "Open a peer report",
+            ["—"] + peers["ticker"].tolist() if "ticker" in peers.columns else ["—"],
+            key="peer_open",
+        )
+        if peer_pick != "—" and st.button("➡️ Open peer", key="peer_open_btn"):
+            st.session_state["report_ticker"] = peer_pick
+            st.session_state["_report_jump"] = True
+            st.rerun()
+

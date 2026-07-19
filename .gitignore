@@ -27,3 +27,9 @@ Thumbs.db
 
 data/
 
+# Offline rescore outputs (CI uploads as artifacts)
+artifacts/
+
+# Local watchlist / personal notes
+watchlist.csv
+

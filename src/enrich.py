@@ -11,23 +11,28 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.quality_score import compute_quality_score, METRIC_CONFIG, build_config, quality_history
-from src.red_flags import detect_red_flags
 from src.data_quality import data_completeness, data_sanity_flags
 from src.institutional_scores import (
-    compute_piotroski,
-    compute_altman_z,
     blend_with_quality,
+    compute_altman_z,
+    compute_beneish,
+    compute_piotroski,
 )
+from src.quality_score import METRIC_CONFIG, build_config, compute_quality_score, quality_history
+from src.red_flags import detect_red_flags
 
-# Features offered to the outperformance model (subset of available columns).
-FEATURE_COLS = [
+# Raw fundamental features for ML (quality_score is optional — it is a blend
+# of these inputs and can inflate importance if included by default).
+RAW_FEATURE_COLS = [
     "revenue_growth", "eps_growth", "operating_profit_growth", "fcf_growth",
     "ebitda_growth", "roe", "roce", "net_margin", "operating_margin",
     "gross_margin", "debt_to_equity", "interest_coverage", "current_ratio",
     "cash_position", "dividend_yield", "dividend_growth", "buyback_yield",
-    "pe", "pb", "ev_ebitda", "peg", "price_sales", "quality_score",
+    "pe", "pb", "ev_ebitda", "peg", "price_sales",
 ]
+
+# Backward-compatible alias (includes quality_score for optional use)
+FEATURE_COLS = RAW_FEATURE_COLS + ["quality_score"]
 
 MIN_FIELDS = 12  # of ~20 core metrics for "substantially populated" latest row
 
@@ -63,8 +68,8 @@ def enrich(df: pd.DataFrame, use_sector: bool = False, config=None) -> pd.DataFr
     """
     Full enrichment pipeline on a multi-year panel → latest cross-section.
 
-    Steps: red flags → sanity → completeness → Piotroski → latest row pick →
-    Altman Z → quality score (optionally sector-relative) → F-score blend.
+    Steps: red flags → sanity → completeness → Piotroski → Beneish →
+    latest row pick → Altman Z → quality score → F-score blend.
     """
     if config is None:
         config = METRIC_CONFIG
@@ -73,8 +78,9 @@ def enrich(df: pd.DataFrame, use_sector: bool = False, config=None) -> pd.DataFr
     df, _flag_cols = detect_red_flags(df)
     df, _warn_cols = data_sanity_flags(df)
     df = data_completeness(df)
-    # Piotroski needs prior-year comparisons before collapsing.
+    # YoY institutional scores before collapsing to latest row.
     df = compute_piotroski(df)
+    df = compute_beneish(df)
     df = _latest_populated(df)
     # Altman Z is point-in-time on the latest cross-section.
     df = compute_altman_z(df)

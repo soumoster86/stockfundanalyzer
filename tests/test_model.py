@@ -4,13 +4,12 @@ import pandas as pd
 import pytest
 
 from src.model import (
+    MIN_TRAIN_ROWS,
     make_label,
+    predict_proba,
     time_split,
     train_outperformance_model,
-    predict_proba,
-    MIN_TRAIN_ROWS,
 )
-
 
 FEATURE_COLS = [
     "revenue_growth", "eps_growth", "roe", "roce", "net_margin",

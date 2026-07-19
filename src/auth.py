@@ -88,16 +88,6 @@ def check_credentials(username: str, password: str, users: dict | None = None) -
     return verify_password(password, stored)
 
 
-FEATURES = [
-    ("📊", "Quality Score Engine", "22 metrics, percentile-ranked vs sector peers"),
-    ("🚩", "Red-Flag Detection", "Earnings-quality, financial & governance forensics"),
-    ("🛡️", "Data-Quality Guards", "Flags distorted or sparse fundamentals"),
-    ("⚖️", "Configurable Weights", "Tilt toward value, quality, growth or safety"),
-    ("📈", "Quality Trends", "See whether fundamentals are improving or declining"),
-    ("🔍", "Compare & Rank", "Side-by-side radar profiles across 2,000+ stocks"),
-]
-
-
 def login_gate():
     """
     Render the login screen and stop the app unless authenticated.
@@ -105,29 +95,20 @@ def login_gate():
     """
     import streamlit as st
 
+    from ui.landing import render_feature_sections, render_hero
+
     if st.session_state.get("auth_user"):
         return st.session_state["auth_user"]
 
     users, is_demo = _get_users()
 
-    _LOGO_SVG = (
-        "<svg width='52' height='52' viewBox='0 0 120 120' style='vertical-align:middle;margin-right:14px;'>"
-        "<rect x='0' y='0' width='120' height='120' rx='26' fill='#0E1A14'/>"
-        "<rect x='1' y='1' width='118' height='118' rx='25' fill='none' stroke='#1D9E75' stroke-width='2'/>"
-        "<rect x='30' y='74' width='14' height='22' rx='3' fill='#2E6E55'/>"
-        "<rect x='53' y='58' width='14' height='38' rx='3' fill='#26B583'/>"
-        "<rect x='76' y='40' width='14' height='56' rx='3' fill='#1D9E75'/>"
-        "<path d='M30 58 L52 42 L70 30 L94 26' fill='none' stroke='#7CF0C0' stroke-width='4' "
-        "stroke-linecap='round' stroke-linejoin='round'/>"
-        "<circle cx='94' cy='26' r='5.5' fill='#7CF0C0'/></svg>"
-    )
-    st.markdown(
-        f"<div style='text-align:center;'>"
-        f"<h1 style='margin-bottom:0;display:inline-flex;align-items:center;justify-content:center;'>"
-        f"{_LOGO_SVG}<span>Fundamental Stock Analyzer</span></h1>"
-        f"<p style='color:#888;margin-top:4px;'>"
-        f"Fundamental quality scoring, ranking &amp; forensic red flags</p></div>",
-        unsafe_allow_html=True,
+    # st.title + caption avoid HTML clipping under Streamlit's top chrome
+    render_hero(
+        st,
+        subtitle=(
+            "Quality scoring · forensic red flags · institutional scores · "
+            "sector ranking · watchlists · optional ML"
+        ),
     )
     st.divider()
 
@@ -155,20 +136,10 @@ def login_gate():
         )
         st.stop()
 
-    left, right = st.columns([1, 1], gap="large")
-    with left:
-        st.subheader("What's inside")
-        for icon, title, desc in FEATURES:
-            st.markdown(
-                f"<div style='border-left:3px solid #1D9E75;padding:6px 12px;"
-                f"margin-bottom:10px;background:#11161c;border-radius:6px;'>"
-                f"<b>{icon} {title}</b><br>"
-                f"<span style='color:#9aa;font-size:0.9em;'>{desc}</span></div>",
-                unsafe_allow_html=True,
-            )
-
+    # Login + What's new (collapsible features — no full Tutorial on landing)
+    left, right = st.columns([1.15, 0.85], gap="large")
     with right:
-        st.subheader("🔒 Secure Login")
+        st.markdown("#### 🔒 Secure login")
         if is_demo:
             st.warning(
                 "Demo mode (`STOCKFUN_DEMO=1`) — use **demo / demo**. "
@@ -195,13 +166,18 @@ def login_gate():
                 st.session_state["auth_attempts"] = attempts + 1
                 st.error("Incorrect username or password.")
 
-        st.markdown(
-            "<p style='color:#888;font-size:0.85em;margin-top:8px;'>"
+        st.caption(
             "Access is restricted. Email "
-            "<a href='mailto:soumoster@gmail.com'>soumoster@gmail.com</a> "
-            "to request credentials.</p>",
-            unsafe_allow_html=True,
+            "[soumoster@gmail.com](mailto:soumoster@gmail.com) to request credentials."
         )
+
+    with left:
+        st.markdown("#### ✨ What's new")
+        st.caption(
+            "Key capabilities in this release. Expand a section to explore. "
+            "After login, open **Tutorial** in the nav for a full how-to guide."
+        )
+        render_feature_sections(st, compact=True, expand_first=False)
 
     st.divider()
     st.markdown(

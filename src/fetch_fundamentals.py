@@ -21,6 +21,7 @@ NOTES / LIMITATIONS
 
 import argparse
 import time
+
 import numpy as np
 import pandas as pd
 
@@ -99,8 +100,6 @@ def fetch_one(ticker: str, date_str: str) -> list:
         ebitda = _safe(fin, ["EBITDA", "Normalized EBITDA"], ycol)
         net_income = _safe(fin, ["Net Income", "Net Income Common Stockholders"], ycol)
         interest_exp = _safe(fin, ["Interest Expense", "Interest Expense Non Operating"], ycol)
-        eps = info.get("trailingEps", np.nan) if i == 0 else np.nan
-
         total_debt = _safe(bs, ["Total Debt"], ycol)
         equity = _safe(bs, ["Stockholders Equity", "Total Stockholder Equity",
                             "Common Stock Equity"], ycol)
@@ -131,7 +130,6 @@ def fetch_one(ticker: str, date_str: str) -> list:
         rev_p = _safe(fin, ["Total Revenue", "Operating Revenue"], pcol) if pcol else np.nan
         op_p = _safe(fin, ["Operating Income"], pcol) if pcol else np.nan
         ebitda_p = _safe(fin, ["EBITDA", "Normalized EBITDA"], pcol) if pcol else np.nan
-        ni_p = _safe(fin, ["Net Income"], pcol) if pcol else np.nan
         opcf_p = _safe(cf, ["Operating Cash Flow"], pcol) if pcol else np.nan
 
         shares = info.get("sharesOutstanding", np.nan)

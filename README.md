@@ -174,22 +174,83 @@ Notes:
 - Public Community Cloud apps are visible to anyone with the link; don't commit
   anything sensitive.
 
+## Schema validation & units
+
+On upload the app validates `ticker` / `date`, warns about sparse YoY history,
+and auto-converts growth columns that look like percent points (e.g. `12`) into
+decimals (`0.12`). Conventions:
+
+| Kind | Examples | Storage | UI display |
+|------|----------|---------|------------|
+| Growth / returns | `revenue_growth`, `fwd_return` | decimal (0.12) | percent points (12%) |
+| Profitability | `roe`, margins, `dividend_yield` | percent points (12) | as-is |
+| Multiples | `pe`, `pb`, `debt_to_equity` | ratio | as-is |
+
+## ML labels (forward returns)
+
+```bash
+pip install yfinance
+python -m src.build_labels --in fundamentals.csv --out labeled.csv \
+  --horizon-years 3 --benchmark ^NSEI
+```
+
+Re-upload `labeled.csv`, open **Train Model**, train, then download the
+`.joblib` bundle to reuse later (upload works on Cloud too for that session).
+
+## India governance overlay
+
+Yahoo leaves promoter pledge / insider / auditor / related-party blank. Upload a
+governance CSV from the sidebar (template download provided). Columns:
+`ticker`, optional `date`, `auditor`, `promoter_pledge_pct`,
+`promoter_holding_change`, `insider_net_buy`, `related_party_txn_flag`.
+
+## Institutional scores
+
+- **Piotroski F** (0–9) — financial health checklist  
+- **Altman Z** — bankruptcy risk (🟢 / 🟡 / 🔴)  
+- **Beneish M** — earnings-manipulation risk (🟢 unlikely · 🔴 likely if M > −1.78)
+
+## Watchlist, screens & peers
+
+- **Watchlist** page — session list with CSV import/export, quality snapshot,
+  sector mix, open/remove actions.
+- **Screens** on Universe Ranking — built-in presets (Clean quality, Value
+  quality, Low leverage, Watchlist only) plus save-your-own filter bundles.
+- **Sector peers** on the Single Stock Report — top quality names in the same
+  sector with one-click open.
+
+## CI & monthly re-score
+
+GitHub Actions:
+
+- `.github/workflows/ci.yml` — pytest + ruff on push/PR; offline rescore smoke.
+- `.github/workflows/monthly-rescore.yml` — 1st of each month (or manual
+  `workflow_dispatch`) scores `fundamentals.csv` if present else `demo_data.csv`,
+  uploads `artifacts/` (rankings + summary JSON).
+
+Local batch score:
+
+```bash
+python scripts/rescore.py --in demo_data.csv --out-dir artifacts
+```
+
 ## Project layout
 
 ```
-app.py                 # Streamlit shell: auth, upload, sidebar, tabs
-ui/                    # Streamlit UI (gauges + per-tab renderers)
-  gauges.py
-  tabs/                # report, ranking, compare, sector, train
-src/                   # Pure logic: scoring, red flags, ML, ranking, auth, fetcher
-  enrich.py            # Full scoring pipeline (cached from app.py)
-  flag_lists.py        # Fast boolean → active-name list aggregation
-tests/                 # pytest suite for src/ + static app checks
-demo_data.csv          # Optional bundled sample universe
-requirements.txt       # Runtime deps for Streamlit Cloud
-requirements-dev.txt   # + pytest for local development
-requirements-ml.txt    # Optional LightGBM / XGBoost for local training
-_archive/              # Old price-predictor stack (not used by the live app)
+app.py                 # Streamlit shell
+ui/tabs/               # report, ranking, watchlist, compare, sector, train
+src/
+  enrich.py, schema.py, governance.py, build_labels.py
+  watchlist.py, screens.py, peers.py
+  institutional_scores.py, flag_lists.py, ...
+scripts/rescore.py     # Offline / CI batch score
+.github/workflows/     # CI + monthly re-score
+tests/
+demo_data.csv
+requirements.txt       # Pinned Cloud runtime
+requirements-dev.txt   # + pytest, ruff
+requirements-ml.txt    # Optional LightGBM / XGBoost
+_archive/              # Old price-predictor stack (unused)
 ```
 
 Dev tests:
@@ -197,6 +258,7 @@ Dev tests:
 ```bash
 pip install -r requirements-dev.txt
 pytest -q
+ruff check app.py src ui scripts tests
 ```
 
 Optional stronger models (local only — keep Cloud installs slim):
@@ -205,9 +267,9 @@ Optional stronger models (local only — keep Cloud installs slim):
 pip install -r requirements-ml.txt
 ```
 
-## Institutional scores (Piotroski F & Altman Z)
+## Institutional scores (Piotroski F, Altman Z, Beneish M)
 
-Two established, *absolute* measures (unlike the relative Quality Score),
+Three established, *absolute* measures (unlike the relative Quality Score),
 in `src/institutional_scores.py`:
 
 **Piotroski F-Score (0–9)** — nine binary financial-health tests: positive net
@@ -219,13 +281,18 @@ turnover. 7–9 strong, 4–6 moderate, 0–3 weak. Shown on the Single Stock Re
 
 **Altman Z-Score** — bankruptcy-risk formula, especially useful for small caps
 and cyclicals. Traffic light: 🟢 > 3 safe · 🟡 1.8–3 grey zone · 🔴 < 1.8
-distress. Shown on the Single Stock Report and as a "Z" column in the ranking.
+distress. Shown on the Report and as a "Z" column in the ranking.
+
+**Beneish M-Score** — earnings-manipulation model (up to 8 indices: DSRI, GMI,
+AQI, SGI, DEPI, SGAI, TATA, LVGI). 🟢 M ≤ −2.22 unlikely · 🟡 grey ·
+🔴 M > −1.78 likely manipulator. Needs multi-year receivables/revenue/margins;
+total assets improves the accruals term. Shown on the Report and as an "M"
+column in the ranking.
 
 **Data note:** the F-Score computes ~7/9 tests from the original fetch; the
 ROA/asset-turnover tests and the *entire* Z-Score need extra balance-sheet
 fields (total assets/liabilities, current assets/liabilities, retained earnings,
-EBIT, market cap). The updated `fetch_fundamentals.py` now captures these — so
-**re-run the fetcher** to enable full F-Scores and Z-Scores.
+EBIT, market cap). Re-run the fetcher to enable full F/Z scores.
 
 ## How the pieces fit
 

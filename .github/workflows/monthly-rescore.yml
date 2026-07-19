@@ -1,0 +1,86 @@
+name: Monthly re-score
+
+# Scores a fundamentals panel offline and uploads ranked artifacts.
+# Default input is demo_data.csv (always present). To score a larger panel,
+# commit/update fundamentals.csv or set the INPUT_CSV repository variable.
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of each month
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+    inputs:
+      input_csv:
+        description: "Path to fundamentals CSV in the repo"
+        required: false
+        default: "demo_data.csv"
+      use_sector:
+        description: "Sector-relative quality (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  rescore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve input CSV
+        id: input
+        run: |
+          INPUT="${{ github.event.inputs.input_csv }}"
+          if [ -z "$INPUT" ]; then INPUT="demo_data.csv"; fi
+          if [ -f fundamentals.csv ]; then
+            # Prefer fundamentals.csv when present (local/full universe)
+            if [ "$INPUT" = "demo_data.csv" ] && [ -f fundamentals.csv ]; then
+              INPUT="fundamentals.csv"
+            fi
+          fi
+          if [ ! -f "$INPUT" ]; then
+            echo "Input $INPUT missing; falling back to demo_data.csv"
+            INPUT="demo_data.csv"
+          fi
+          echo "path=$INPUT" >> "$GITHUB_OUTPUT"
+          echo "Using input: $INPUT"
+
+      - name: Re-score universe
+        run: |
+          EXTRA=""
+          if [ "${{ github.event.inputs.use_sector }}" = "true" ]; then
+            EXTRA="--use-sector"
+          fi
+          python scripts/rescore.py --in "${{ steps.input.outputs.path }}" --out-dir artifacts $EXTRA
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ranked-universe-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "## Monthly re-score" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f artifacts/score_summary.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          s = json.loads(Path("artifacts/score_summary.json").read_text())
+          print(f"- Source: `{s.get('source')}`")
+          print(f"- Tickers: **{s.get('n_tickers')}**")
+          print(f"- Avg quality: **{s.get('avg_quality')}**")
+          print(f"- Data warnings: **{s.get('n_data_warnings')}**")
+          print(f"- Generated (UTC): `{s.get('generated_at_utc')}`")
+          PY
+          fi

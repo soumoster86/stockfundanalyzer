@@ -6,10 +6,11 @@ import pandas as pd
 import streamlit as st
 
 from src.ranking import rank_universe
+from ui.theme import section, badge_row
 
 
 def render_sector(data: pd.DataFrame) -> None:
-    st.subheader("Sector Overview")
+    section("Sector overview")
     if "sector" not in data.columns or data["sector"].dropna().nunique() < 2:
         st.info(
             "No sector data available. Re-run the fetcher to populate the "
@@ -48,6 +49,16 @@ def render_sector(data: pd.DataFrame) -> None:
         "Largest sector",
         summary.loc[summary["Stocks"].idxmax(), "Sector"],
         f"{int(summary['Stocks'].max())} stocks",
+    )
+    st.markdown(
+        badge_row(
+            [
+                (f"Best: {c1_best['Sector']}", "Strong"),
+                (f"Avg Q {c1_best['Avg quality']:.0f}", "Strong"),
+                (f"Top {c1_best.get('Top stock', '—')}", "Moderate"),
+            ]
+        ),
+        unsafe_allow_html=True,
     )
 
     st.markdown("**Average quality score by sector**")

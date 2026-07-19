@@ -7,8 +7,6 @@ ranked leaderboard. Red flags apply a penalty / demotion.
 
 from __future__ import annotations
 
-import pandas as pd
-
 
 def rank_universe(df, quality_col="quality_score", proba_col="outperform_proba",
                   red_flag_col="red_flag_count",

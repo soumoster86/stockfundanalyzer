@@ -1,6 +1,7 @@
-streamlit>=1.32
-pandas>=2.0
-numpy>=1.24
-scikit-learn>=1.3
-pillow>=10.0
-joblib>=1.3
+# Runtime (Streamlit Community Cloud). Pins keep deploys reproducible.
+streamlit>=1.32,<2
+pandas>=2.0,<3
+numpy>=1.24,<3
+scikit-learn>=1.3,<2
+pillow>=10.0,<12
+joblib>=1.3,<2

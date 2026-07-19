@@ -108,10 +108,20 @@ def _labeled(frame, feature_cols, label_col):
     return X.loc[mask].astype(float), y.loc[mask].astype(int)
 
 
-def train_outperformance_model(df, feature_cols, kind="lightgbm",
-                               date_col="date", label_col="target_outperform"):
+def train_outperformance_model(
+    df,
+    feature_cols,
+    kind="lightgbm",
+    date_col="date",
+    label_col="target_outperform",
+    calibrate: bool = False,
+):
     """
     Train a classifier with train-only median imputation.
+
+    If calibrate=True and the validation split has both classes, wraps the
+    classifier in sklearn CalibratedClassifierCV (isotonic, cv='prefit' style
+    via a small holdout fit on validation when large enough).
 
     Returns (pipeline, report). Raises ValueError when data is insufficient.
     """
@@ -140,8 +150,28 @@ def train_outperformance_model(df, feature_cols, kind="lightgbm",
     report = {
         "n_train": int(len(ytr)),
         "train_base_rate": float(ytr.mean()),
+        "baseline_auc": 0.5,
         "features": list(feature_cols),
+        "calibrated": False,
     }
+
+    # Optional probability calibration on the validation slice
+    if calibrate:
+        Xva, yva = _labeled(valid, feature_cols, label_col)
+        if len(yva) >= 10 and yva.nunique() > 1:
+            try:
+                from sklearn.calibration import CalibratedClassifierCV
+                # Fit imputer+clf already done; calibrate using frozen base via cv=3 on train
+                base = build_model(kind)
+                cal_pipe = Pipeline([
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("clf", CalibratedClassifierCV(base, method="isotonic", cv=3)),
+                ])
+                cal_pipe.fit(Xtr, ytr)
+                pipe = cal_pipe
+                report["calibrated"] = True
+            except Exception as e:
+                report["calibrate_error"] = str(e)
 
     for name, frame in {"valid": valid, "test": test}.items():
         X, y = _labeled(frame, feature_cols, label_col)
@@ -155,14 +185,26 @@ def train_outperformance_model(df, feature_cols, kind="lightgbm",
             }
             continue
         p = pipe.predict_proba(X)[:, 1]
+        auc = float(roc_auc_score(y, p))
         report[name] = {
-            "auc": float(roc_auc_score(y, p)),
+            "auc": auc,
             "n": int(len(y)),
             "base_rate": float(y.mean()),
+            "edge_vs_random": auc - 0.5,
         }
 
     clf_step = pipe.named_steps["clf"]
-    if hasattr(clf_step, "feature_importances_"):
+    # CalibratedClassifierCV nests the estimator
+    inner = clf_step
+    if hasattr(inner, "calibrated_classifiers_"):
+        try:
+            inner = inner.calibrated_classifiers_[0].estimator
+        except Exception:
+            inner = clf_step
+    if hasattr(inner, "feature_importances_"):
+        imp = pd.Series(inner.feature_importances_, index=feature_cols)
+        report["feature_importance"] = imp.sort_values(ascending=False)
+    elif hasattr(clf_step, "feature_importances_"):
         imp = pd.Series(clf_step.feature_importances_, index=feature_cols)
         report["feature_importance"] = imp.sort_values(ascending=False)
 
@@ -174,3 +216,14 @@ def predict_proba(model, df, feature_cols):
     feature_cols = [c for c in feature_cols if c in df.columns]
     X = df[feature_cols].astype(float)
     return model.predict_proba(X)[:, 1]
+
+
+def pack_model_bundle(model, features, report=None) -> dict:
+    """Serializable bundle for joblib download/upload."""
+    return {
+        "model": model,
+        "features": list(features),
+        "report": report or {},
+        "version": 1,
+    }
+

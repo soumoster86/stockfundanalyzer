@@ -12,7 +12,6 @@ import pandas as pd
 
 from src.flag_lists import active_names_per_row
 
-
 DEFAULT_THRESHOLDS = {
     "receivables_vs_revenue_mult": 1.5,   # receivables growth > 1.5x revenue growth
     "share_dilution_pct": 0.05,           # >5% YoY share count increase

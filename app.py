@@ -3,41 +3,50 @@ Fundamental Stock Analyzer - Streamlit App
 ==========================================
 Run:  streamlit run app.py
 
-Tabs:
-  1. Single Stock Report  - quality score breakdown + red flags
-  2. Universe Ranking      - multi-factor leaderboard
-  3. Compare               - side-by-side radars
-  4. Sector Overview       - sector aggregates
-  5. Train Model           - (re)train the global outperformance model
-
 UI lives in ui/; scoring pipeline in src/enrich.py.
 """
 
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
 from src.auth import login_gate, logout_button
-from src.enrich import enrich, build_history_panel, config_from_weights, is_tickers_only
+from src.enrich import build_history_panel, config_from_weights, enrich, is_tickers_only
+from src.governance import governance_template_csv, merge_governance
 from src.quality_score import (
-    DEFAULT_CATEGORY_WEIGHTS,
     CATEGORY_TOOLTIPS,
+    DEFAULT_CATEGORY_WEIGHTS,
     build_config,
 )
-from src.sample_data import sample_csv_bytes, sample_dataframe, COLUMN_DOCS
+from src.sample_data import COLUMN_DOCS, sample_csv_bytes, sample_dataframe
+from src.schema import prepare_panel
 from ui.tabs import (
-    render_report,
-    render_ranking,
     render_compare,
+    render_ranking,
+    render_report,
     render_sector,
     render_train,
+    render_tutorial,
+    render_watchlist,
 )
+from ui.theme import inject_global_css
+
+NAV_PAGES = [
+    "Single Stock Report",
+    "Universe Ranking",
+    "Watchlist",
+    "Compare",
+    "Sector Overview",
+    "Train Model",
+    "Tutorial",
+]
 
 # ---------------------------------------------------------------------------
-# Page config + auth (must run before any other Streamlit body)
+# Page config + auth
 # ---------------------------------------------------------------------------
 _PAGE_ICON = "📊"
 _logo_png = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
@@ -54,27 +63,22 @@ st.set_page_config(
     page_icon=_PAGE_ICON,
     layout="wide",
 )
+inject_global_css()
 
 login_gate()
 logout_button()
 
 # ---------------------------------------------------------------------------
-# Cached pipeline wrappers (hashable weights_tuple for Streamlit cache keys)
+# Cached pipeline wrappers
 # ---------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_data(file):
     df = pd.read_csv(file)
-    df.columns = [c.strip().lower() for c in df.columns]
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(
-            df["date"], format="mixed", dayfirst=True, errors="coerce"
-        )
     return df
 
 
 @st.cache_data(show_spinner="Scoring universe…")
 def cached_enrich(raw_df: pd.DataFrame, use_sector: bool, weights_tuple: tuple):
-    """Cache enrich across reruns when data + weights + sector toggle are unchanged."""
     cfg = config_from_weights(weights_tuple)
     return enrich(raw_df, use_sector=use_sector, config=cfg)
 
@@ -88,61 +92,142 @@ def cached_history(raw_df: pd.DataFrame, use_sector: bool, weights_tuple: tuple)
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-_HEADER_LOGO = (
-    "<svg width='44' height='44' viewBox='0 0 120 120' style='vertical-align:middle;margin-right:12px;'>"
-    "<rect x='0' y='0' width='120' height='120' rx='26' fill='#0E1A14'/>"
-    "<rect x='1' y='1' width='118' height='118' rx='25' fill='none' stroke='#1D9E75' stroke-width='2'/>"
-    "<rect x='30' y='74' width='14' height='22' rx='3' fill='#2E6E55'/>"
-    "<rect x='53' y='58' width='14' height='38' rx='3' fill='#26B583'/>"
-    "<rect x='76' y='40' width='14' height='56' rx='3' fill='#1D9E75'/>"
-    "<path d='M30 58 L52 42 L70 30 L94 26' fill='none' stroke='#7CF0C0' stroke-width='4' "
-    "stroke-linecap='round' stroke-linejoin='round'/>"
-    "<circle cx='94' cy='26' r='5.5' fill='#7CF0C0'/></svg>"
+from ui.landing import render_hero
+
+render_hero(
+    st,
+    subtitle=(
+        "Quality · red flags · Piotroski / Altman / Beneish · screens · "
+        "watchlist · compare · sectors · optional ML"
+    ),
 )
-st.markdown(
-    f"<h1 style='display:inline-flex;align-items:center;margin-bottom:0;'>"
-    f"{_HEADER_LOGO}<span>Fundamental Stock Analyzer</span></h1>",
-    unsafe_allow_html=True,
-)
-st.caption(
-    "Quality Score Engine · Self-learning Outperformance Model · "
-    "Multi-Factor Ranking · Red-Flag Detection"
-)
+# Full how-to lives under nav **Tutorial** / sidebar — not on the main chrome
 
 # ---------------------------------------------------------------------------
-# Sidebar: upload + scoring controls
+# Sidebar: upload + governance + scoring controls
 # ---------------------------------------------------------------------------
-uploaded = st.sidebar.file_uploader("Upload fundamentals panel (CSV)", type="csv")
-
+# Default data file shipped / generated next to app.py
+DEFAULT_FUNDAMENTALS = "fundamentals.csv"
+LABELED_DEFAULT = "labeled.csv"  # optional pre-labeled panel
 DEMO_PATH = "demo_data.csv"
-demo_available = os.path.exists(DEMO_PATH)
+
+default_fund_path = None
+for candidate in (DEFAULT_FUNDAMENTALS, LABELED_DEFAULT):
+    p = os.path.join(os.path.dirname(__file__) or ".", candidate)
+    if os.path.exists(p):
+        default_fund_path = p
+        break
+    if os.path.exists(candidate):
+        default_fund_path = candidate
+        break
+
+demo_available = os.path.exists(DEMO_PATH) or os.path.exists(
+    os.path.join(os.path.dirname(__file__) or ".", DEMO_PATH)
+)
+
+st.sidebar.markdown("### 📂 Data source")
+uploaded = st.sidebar.file_uploader(
+    "Upload a different fundamentals CSV (optional)",
+    type="csv",
+    help="Leave empty to use the project’s fundamentals.csv automatically. "
+         "Upload here to override with a new file (e.g. labeled.csv).",
+)
+
 use_demo = False
-if demo_available and uploaded is None:
+if default_fund_path is None and demo_available and uploaded is None:
     use_demo = st.sidebar.button(
         "▶️ Load demo data",
         help="Explore the app with a bundled sample universe.",
     )
+elif default_fund_path is not None and uploaded is None:
+    st.sidebar.caption(
+        f"Using project file **`{os.path.basename(default_fund_path)}`** by default. "
+        "Upload above only if you want to replace it for this session."
+    )
+    if demo_available:
+        use_demo = st.sidebar.button(
+            "▶️ Load demo data instead",
+            help="Ignore fundamentals.csv and load the small demo sample.",
+        )
 
 st.sidebar.download_button(
-    "⬇️ Download sample CSV template",
+    "⬇️ Sample fundamentals template",
     data=sample_csv_bytes(),
     file_name="stock_analyzer_template.csv",
     mime="text/csv",
-    help="Pre-filled example with 2 tickers x 2 years. Replace with your own data.",
-)
-st.sidebar.markdown(
-    "CSV must include: `ticker`, `date`, the metric columns, and for training "
-    "`fwd_return` + `bench_fwd_return`. Use at least 2 years per ticker so the "
-    "year-over-year red-flag rules can compute."
+    help="Pre-filled example with 2 tickers × 2 years.",
 )
 
-if uploaded is None and not use_demo:
-    st.info(
-        "Upload a CSV to begin"
-        + (", click **Load demo data** in the sidebar," if demo_available else "")
-        + " or download the sample template, fill it with your data, and upload it back."
+with st.sidebar.expander("🇮🇳 India governance CSV (optional)"):
+    st.caption(
+        "Yahoo does not provide promoter pledge, insider trades, auditor, or "
+        "related-party flags. Upload a governance overlay so those red flags can fire."
     )
-    with st.expander("📋 Preview the sample template & column guide", expanded=True):
+    st.download_button(
+        "⬇️ Governance template",
+        data=governance_template_csv(),
+        file_name="governance_template.csv",
+        mime="text/csv",
+    )
+    gov_file = st.file_uploader(
+        "Upload governance CSV",
+        type="csv",
+        key="gov_upload",
+    )
+
+st.sidebar.markdown(
+    "CSV needs `ticker`, `date`, metric columns. Growth fields are **decimals** "
+    "(0.12 = 12%); ROE/margins are **percent points** (12 = 12%). "
+    "For ML labels run `python -m src.build_labels`."
+)
+if st.sidebar.button("📖 Open Tutorial", use_container_width=True):
+    st.session_state["_pending_nav"] = "Tutorial"
+    st.rerun()
+
+# Resolve which source to load (upload > demo button > project fundamentals > empty)
+data_source_label = None
+data_source_path = None
+file_mtime = None
+
+if uploaded is not None:
+    raw_in = load_data(uploaded)
+    data_source_label = f"Upload: {getattr(uploaded, 'name', 'uploaded.csv')}"
+elif use_demo:
+    demo_p = DEMO_PATH if os.path.exists(DEMO_PATH) else os.path.join(
+        os.path.dirname(__file__) or ".", DEMO_PATH
+    )
+    raw_in = load_data(demo_p)
+    data_source_label = f"Demo: {os.path.basename(demo_p)}"
+    data_source_path = demo_p
+    file_mtime = os.path.getmtime(demo_p)
+elif default_fund_path is not None:
+    raw_in = load_data(default_fund_path)
+    data_source_label = f"Project: {os.path.basename(default_fund_path)}"
+    data_source_path = default_fund_path
+    file_mtime = os.path.getmtime(default_fund_path)
+else:
+    from ui.landing import render_feature_sections, render_hero
+
+    render_hero(
+        st,
+        subtitle="Load a fundamentals panel to start scoring, screening, and researching.",
+    )
+    st.info(
+        "No `fundamentals.csv` found in the project folder. "
+        "Upload a CSV in the sidebar"
+        + (", click **Load demo data**," if demo_available else "")
+        + ", or generate one:\n\n"
+        "`python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv`"
+    )
+
+    st.markdown("##### ✨ What's new")
+    st.caption(
+        "Expand a section for capabilities. "
+        "After you load data, use the **Tutorial** page for step-by-step usage."
+    )
+    render_feature_sections(st, compact=False, expand_first=False)
+
+    with st.expander("📋 Preview the sample template & column guide", expanded=False):
         st.dataframe(sample_dataframe(), use_container_width=True)
         st.markdown("**Column reference**")
         st.dataframe(
@@ -152,28 +237,95 @@ if uploaded is None and not use_demo:
             use_container_width=True,
             hide_index=True,
         )
+        st.markdown(
+            "**Units:** growth / fwd returns = decimals · "
+            "ROE, margins, dividend yield = percent points · "
+            "ratios (P/E, D/E) = multiples."
+        )
     st.stop()
 
-raw = load_data(DEMO_PATH if use_demo else uploaded)
+raw, validation, unit_notes = prepare_panel(raw_in)
+
+if validation.errors:
+    st.error("**Upload failed validation**")
+    for e in validation.errors:
+        st.markdown(f"- {e}")
+    st.stop()
+
+for w in validation.warnings:
+    st.warning(w)
+for note in validation.info:
+    st.caption(f"ℹ️ {note}")
+
+# Data freshness banner (file mtime + fiscal date range in the panel)
+_date_min = _date_max = None
+if "date" in raw.columns and raw["date"].notna().any():
+    _date_min = pd.to_datetime(raw["date"], errors="coerce").min()
+    _date_max = pd.to_datetime(raw["date"], errors="coerce").max()
+
+_mtime_txt = ""
+if file_mtime is not None:
+    _mtime_txt = datetime.fromtimestamp(file_mtime).strftime("%Y-%m-%d %H:%M")
+elif uploaded is not None:
+    _mtime_txt = "this session (upload)"
+
+_fiscal_txt = "—"
+if _date_min is not None and pd.notna(_date_min):
+    if _date_max is not None and pd.notna(_date_max) and _date_min != _date_max:
+        _fiscal_txt = (
+            f"{_date_min.strftime('%Y-%m-%d')} → {_date_max.strftime('%Y-%m-%d')}"
+        )
+    else:
+        _fiscal_txt = _date_min.strftime("%Y-%m-%d")
+
+st.info(
+    f"**Data source:** {data_source_label}"
+    + (f" · **File updated:** {_mtime_txt}" if _mtime_txt else "")
+    + f" · **Fiscal dates in file:** {_fiscal_txt}"
+    + (
+        " · Upload a CSV in the sidebar to override for this session."
+        if uploaded is None and default_fund_path is not None
+        else ""
+    )
+)
+
+# Optional governance overlay (before scoring so red flags see the fields)
+if gov_file is not None:
+    try:
+        raw, gov_stats = merge_governance(raw, gov_file)
+        st.sidebar.success(
+            f"Governance merged ({gov_stats['mode']}): "
+            f"{gov_stats['n_tickers_matched']} tickers, "
+            f"{gov_stats['n_rows_with_gov']} rows, "
+            f"cols={', '.join(gov_stats['cols_merged']) or '—'}."
+        )
+        # Bust enrich cache key by tagging session
+        st.session_state["gov_merged"] = True
+    except Exception as e:
+        st.sidebar.error(f"Governance merge failed: {e}")
+
+# Keep multi-year panel for training labels
+st.session_state["raw_panel"] = raw
 
 if is_tickers_only(raw):
     st.warning("This looks like a **tickers-only** file (just ticker/date, no metrics).")
     st.markdown(
-        "To analyze, you first need to fetch the fundamentals. This runs **locally** "
-        "(it needs internet access to Yahoo Finance), then you upload the result here.\n\n"
-        "**Steps:**\n"
-        "1. Install: `pip install yfinance`\n"
-        "2. Run the fetcher on your tickers file:\n"
+        "Fetch fundamentals locally, then upload the result:\n\n"
+        "1. `pip install yfinance`\n"
+        "2. Run:"
     )
     st.code(
         "python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv",
         language="bash",
     )
     st.markdown(
-        "3. Upload the generated `fundamentals.csv` here instead.\n\n"
-        "**Note:** Yahoo provides the financial metrics, profitability, valuation, and the "
-        "earnings/financial red-flag inputs. India-specific governance fields are **not** "
-        "available from free sources and will stay blank unless you add that data yourself."
+        "3. Optional labels:\n"
+        "```bash\n"
+        "python -m src.build_labels --in fundamentals.csv --out labeled.csv "
+        "--horizon-years 3 --benchmark ^NSEI\n"
+        "```\n"
+        "4. Optional governance: upload a governance CSV in the sidebar.\n"
+        "5. Upload `fundamentals.csv` / `labeled.csv` here."
     )
     st.info(f"Detected {raw['ticker'].nunique()} unique tickers in your upload.")
     st.stop()
@@ -184,13 +336,12 @@ if has_sector:
     use_sector = st.sidebar.checkbox(
         "Rank within sector (peer-relative)",
         value=True,
-        help="Compares each stock against others in its own sector rather than the "
-             "whole universe. Small sectors (<5 stocks) fall back to overall ranking.",
+        help="Compares each stock against sector peers. Small sectors fall back "
+             "to overall ranking.",
     )
 else:
     st.sidebar.caption(
-        "ℹ️ No `sector` column found — ranking against the full universe. "
-        "Re-run the fetcher to populate sectors automatically."
+        "ℹ️ No `sector` column — ranking vs full universe. Re-run the fetcher to add sectors."
     )
 
 # ---- Configurable category weights ----
@@ -272,9 +423,10 @@ else:
 weights_tuple = tuple(sorted(weights.items()))
 custom_config = build_config(weights)
 
+# Include gov merge flag in cache key via a hash of gov-related columns presence
+# Streamlit cache keys on raw_df content, so a governance-updated frame busts cache.
 data = cached_enrich(raw, use_sector, weights_tuple)
 
-# Re-apply ML scores from session (training is ephemeral; enrich rebuilds every run)
 if "outperform_by_ticker" in st.session_state:
     data = data.copy()
     data["outperform_proba"] = data["ticker"].map(st.session_state["outperform_by_ticker"])
@@ -282,44 +434,48 @@ if "outperform_by_ticker" in st.session_state:
 history_panel = cached_history(raw, use_sector, weights_tuple)
 
 # ---------------------------------------------------------------------------
-# Summary banner + tabs
+# Summary banner + controlled navigation (supports ranking → report jump)
 # ---------------------------------------------------------------------------
 _n_stocks = data["ticker"].nunique()
 _n_sectors = data["sector"].nunique() if "sector" in data.columns else 0
 _avg_q = data["quality_score"].mean() if "quality_score" in data.columns else float("nan")
 _warned = int(data["data_warning"].sum()) if "data_warning" in data.columns else 0
 b1, b2, b3, b4 = st.columns(4)
-b1.metric("Universe", f"{_n_stocks:,} stocks", help="Number of unique stocks loaded and scored.")
-b2.metric("Sectors", _n_sectors if _n_sectors else "—", help="Distinct sectors represented.")
-b3.metric(
-    "Avg quality",
-    f"{_avg_q:.1f}" if pd.notna(_avg_q) else "—",
-    help="Mean quality score across the universe (0–100).",
-)
-b4.metric(
-    "Data warnings",
-    _warned,
-    help="Stocks with distorted/implausible figures flagged for manual review.",
-)
+b1.metric("Universe", f"{_n_stocks:,} stocks")
+b2.metric("Sectors", _n_sectors if _n_sectors else "—")
+b3.metric("Avg quality", f"{_avg_q:.1f}" if pd.notna(_avg_q) else "—")
+b4.metric("Data warnings", _warned)
 st.divider()
 
-tab1, tab2, tab_compare, tab_sector, tab3 = st.tabs(
-    [
-        "Single Stock Report",
-        "Universe Ranking",
-        "Compare",
-        "Sector Overview",
-        "Train Model",
-    ]
+# Navigation radio uses key "nav_page". Streamlit forbids changing that key
+# after the widget is created in the same run, so page jumps (Ranking → Report)
+# write to "_pending_nav" and we apply it *here* before instantiating the radio.
+if "_pending_nav" in st.session_state:
+    pending = st.session_state.pop("_pending_nav")
+    if pending in NAV_PAGES:
+        st.session_state["nav_page"] = pending
+elif "nav_page" not in st.session_state:
+    st.session_state["nav_page"] = NAV_PAGES[0]
+
+page = st.radio(
+    "Navigate",
+    NAV_PAGES,
+    horizontal=True,
+    label_visibility="collapsed",
+    key="nav_page",
 )
 
-with tab1:
+if page == "Single Stock Report":
     render_report(data, history_panel, custom_config)
-with tab2:
+elif page == "Universe Ranking":
     render_ranking(data)
-with tab_compare:
+elif page == "Watchlist":
+    render_watchlist(data)
+elif page == "Compare":
     render_compare(data)
-with tab_sector:
+elif page == "Sector Overview":
     render_sector(data)
-with tab3:
+elif page == "Train Model":
     render_train(data)
+elif page == "Tutorial":
+    render_tutorial()

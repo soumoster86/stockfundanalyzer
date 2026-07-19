@@ -1,7 +1,7 @@
 """Scoring pipeline (pure enrich, no Streamlit)."""
 import pandas as pd
 
-from src.enrich import enrich, build_history_panel, is_tickers_only, FEATURE_COLS
+from src.enrich import FEATURE_COLS, build_history_panel, enrich, is_tickers_only
 from src.sample_data import sample_dataframe
 
 

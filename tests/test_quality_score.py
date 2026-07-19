@@ -1,13 +1,12 @@
 """Quality score engine: percentiles, weights, sector fallback, labels."""
-import numpy as np
 import pandas as pd
 
 from src.quality_score import (
-    compute_quality_score,
-    build_config,
-    score_label,
     DEFAULT_CATEGORY_WEIGHTS,
     METRIC_CONFIG,
+    build_config,
+    compute_quality_score,
+    score_label,
 )
 
 

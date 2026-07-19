@@ -1,13 +1,11 @@
 """Piotroski F-Score and Altman Z-Score."""
-import numpy as np
 import pandas as pd
 
 from src.institutional_scores import (
-    compute_piotroski,
-    compute_altman_z,
-    f_score_band,
-    z_band,
     blend_with_quality,
+    compute_altman_z,
+    compute_piotroski,
+    f_score_band,
 )
 from src.sample_data import sample_dataframe
 

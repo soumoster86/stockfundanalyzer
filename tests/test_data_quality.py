@@ -2,8 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from src.data_quality import data_completeness, data_sanity_flags, CORE_METRICS
-from src.sample_data import sample_dataframe
+from src.data_quality import CORE_METRICS, data_completeness, data_sanity_flags
 
 
 def test_completeness_counts(sample_panel):

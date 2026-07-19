@@ -11,7 +11,6 @@ Neither alters the quality score; they annotate it. The philosophy: never
 silently rank a number we have reason to distrust — mark it "verify manually".
 """
 
-import numpy as np
 import pandas as pd
 
 from src.flag_lists import active_names_per_row

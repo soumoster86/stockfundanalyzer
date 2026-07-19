@@ -1,0 +1,10 @@
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]  # line length handled softly; Streamlit UI is verbose
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]
+"scripts/*" = ["E402"]

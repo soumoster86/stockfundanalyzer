@@ -5,15 +5,17 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.quality_score import METRIC_CONFIG, score_label, CONCEPT_TOOLTIPS
+from src.quality_score import CONCEPT_TOOLTIPS, METRIC_CONFIG, score_label
 from src.red_flags import REASON_TEXT
+from src.institutional_scores import z_band, m_band
 from ui.gauges import category_radar_svg
+from ui.theme import badge_row, section, quality_color
 
 
 def render_compare(data: pd.DataFrame) -> None:
-    st.subheader("Compare Stocks")
+    section("Compare stocks")
     st.caption(
-        "Pick 2–5 stocks to see their scores, categories, and key metrics side by side."
+        "Pick 2–5 stocks for side-by-side radars, quality badges, and key metrics."
     )
     all_tickers = sorted(data["ticker"].str.replace(".NS", "", regex=False).unique())
     picks = st.multiselect(
@@ -36,6 +38,22 @@ def render_compare(data: pd.DataFrame) -> None:
     for i, (_, row) in enumerate(sel.iterrows()):
         with cols[i]:
             st.markdown(f"**{row['disp_ticker']}**")
+            q = row.get("quality_score")
+            q_lab = score_label(q) if pd.notna(q) else "N/A"
+            zb = row.get("z_band") if "z_band" in row.index else z_band(row.get("z_score"))
+            mb = row.get("m_band") if "m_band" in row.index else m_band(row.get("m_score"))
+            n_flags = int(row["red_flag_count"]) if pd.notna(row.get("red_flag_count")) else 0
+            st.markdown(
+                badge_row(
+                    [
+                        (q_lab, q_lab if q_lab != "N/A" else "N/A"),
+                        (f"Z {zb}", zb or "N/A"),
+                        (f"M {mb}", mb or "N/A"),
+                        (f"{n_flags}🚩", "Red" if n_flags else "Green"),
+                    ]
+                ),
+                unsafe_allow_html=True,
+            )
             cmap = {}
             for c in METRIC_CONFIG:
                 col = f"{c.replace(' ', '_').lower()}_score"
@@ -45,13 +63,20 @@ def render_compare(data: pd.DataFrame) -> None:
                 category_radar_svg(cmap, color=palette[i % len(palette)], size=210),
                 unsafe_allow_html=True,
             )
-            q = row.get("quality_score")
             st.metric(
                 "Quality",
                 f"{q:.1f}" if pd.notna(q) else "—",
-                score_label(q) if pd.notna(q) else "",
+                q_lab if pd.notna(q) else "",
                 help=CONCEPT_TOOLTIPS["quality_score"],
             )
+            if pd.notna(q):
+                st.markdown(
+                    f'<div style="height:8px;background:#30363D;border-radius:4px;'
+                    f'overflow:hidden;margin-top:-0.5rem;">'
+                    f'<div style="width:{min(100, float(q)):.0f}%;height:100%;'
+                    f'background:{quality_color(float(q))};"></div></div>',
+                    unsafe_allow_html=True,
+                )
 
     st.markdown("**Metrics side by side**")
     metric_rows = {
