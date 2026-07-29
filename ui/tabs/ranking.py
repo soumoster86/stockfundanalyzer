@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from src.market_buckets import filter_by_bucket
 from src.quality_score import CONCEPT_TOOLTIPS, METRIC_TOOLTIPS
 from src.ranking import rank_universe
 from src.screens import (
@@ -89,8 +90,12 @@ def render_ranking(data: pd.DataFrame) -> None:
         "Revenue growth": ("revenue_growth", False),
     }
 
-    # Row 1: preset + search + sector
-    r1a, r1b, r1c = st.columns([1.4, 1.1, 1.5])
+    has_mcap = "mcap_bucket" in ranked.columns and (
+        ranked["mcap_bucket"].fillna("Unknown") != "Unknown"
+    ).any()
+
+    # Row 1: preset + search + sector (+ market-cap when present)
+    r1a, r1b, r1c, r1d = st.columns([1.3, 1.0, 1.2, 1.0])
     with r1a:
         screen_name = st.selectbox(
             "Screen",
@@ -128,6 +133,28 @@ def render_ranking(data: pd.DataFrame) -> None:
         else:
             sector_pick = "All sectors"
             st.selectbox("Sector", ["All sectors"], disabled=True, key="rank_sector_na")
+    with r1d:
+        if has_mcap:
+            buckets = ["All"] + [
+                b
+                for b in ("Large", "Mid", "Small", "Micro")
+                if b in set(ranked["mcap_bucket"].dropna().unique())
+            ]
+            mcap_pick = st.selectbox(
+                "Market cap",
+                buckets,
+                key="rank_mcap",
+                help="Large / Mid / Small / Micro from market_cap (INR-oriented defaults).",
+            )
+        else:
+            mcap_pick = "All"
+            st.selectbox(
+                "Market cap",
+                ["All"],
+                disabled=True,
+                key="rank_mcap_na",
+                help="Needs a market_cap column in the fundamentals panel.",
+            )
 
     # Row 2: thresholds (values come from session after screen sync above)
     t1, t2, t3, t4 = st.columns(4)
@@ -249,6 +276,8 @@ def render_ranking(data: pd.DataFrame) -> None:
         view = view[view["ticker"].str.upper().str.contains(search)]
     if sector_pick != "All sectors" and has_sector_col:
         view = view[view["sector"] == sector_pick]
+    if mcap_pick != "All":
+        view = filter_by_bucket(view, mcap_pick)
     sort_col, asc = sort_opts[sort_by]
     if sort_col in view.columns:
         view = view.sort_values(sort_col, ascending=asc, na_position="last")
@@ -278,6 +307,8 @@ def render_ranking(data: pd.DataFrame) -> None:
     candidate_cols = ["rank", "ticker"]
     if has_sector_col:
         candidate_cols.append("sector")
+    if "mcap_bucket" in view.columns:
+        candidate_cols.append("mcap_bucket")
     candidate_cols += ["composite_score", "quality_score"]
     if "outperform_proba" in view.columns:
         candidate_cols.append("outperform_proba")

@@ -31,8 +31,13 @@ def active_names_per_row(
     if not present:
         return [[] for _ in range(n)]
 
-    # fillna(False) then bool — avoids object dtype slowdowns
-    mat = df[present].fillna(False).to_numpy(dtype=bool, copy=False)
+    # Boolean matrix without FutureWarning on object downcasting
+    block = df[present]
+    if block.shape[1]:
+        block = block.where(block.notna(), False)
+        mat = block.to_numpy(dtype=bool, copy=False)
+    else:
+        mat = np.zeros((n, 0), dtype=bool)
     names = np.asarray(present, dtype=object)
     # row is a 1d bool view; names[row] selects active labels
     return [names[row].tolist() for row in mat]

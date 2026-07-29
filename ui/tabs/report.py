@@ -28,6 +28,7 @@ from src.quality_score import (
     ticker_trend,
 )
 from src.red_flags import REASON_TEXT
+from src.report_export import build_research_note
 from src.watchlist import add_ticker, is_watched, remove_ticker
 from ui.gauges import CATEGORY_SHORT, category_radar_svg, quality_gauge_svg
 from ui.theme import (
@@ -88,8 +89,8 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
         else 0
     )
 
-    # Watchlist toggle
-    wl_col, _ = st.columns([1, 3])
+    # Watchlist toggle + research note download
+    wl_col, dl_col, _ = st.columns([1.2, 1.2, 1.6])
     with wl_col:
         if is_watched(st.session_state, tk):
             if st.button("⭐ On watchlist — remove", key="rpt_wl_rm"):
@@ -99,6 +100,25 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
             if st.button("☆ Add to watchlist", key="rpt_wl_add"):
                 add_ticker(st.session_state, tk)
                 st.rerun()
+    with dl_col:
+        peers_for_note, peer_group = sector_peers(data, tk, n=5)
+        trend_for_note = ticker_trend(history_panel, tk)
+        note_md = build_research_note(
+            latest,
+            history_points=trend_for_note.get("points") or None,
+            peers=peers_for_note,
+            sector=peer_group or (latest.get("sector") if "sector" in latest.index else None),
+            config=custom_config,
+        )
+        safe_name = str(tk).replace("/", "_").replace("\\", "_")
+        st.download_button(
+            "⬇️ Research note",
+            data=note_md.encode("utf-8"),
+            file_name=f"{safe_name}_research_note.md",
+            mime="text/markdown",
+            key="rpt_note_dl",
+            help="Markdown one-pager you can share or convert to PDF.",
+        )
 
     # Status badge strip
     badge_items = [
@@ -381,14 +401,15 @@ def render_report(data: pd.DataFrame, history_panel: pd.DataFrame, custom_config
     else:
         st.markdown(ok_banner("No red flags detected."), unsafe_allow_html=True)
 
-    # ---- Sector peers (colored Z / M badges) ----
-    section("Sector peers")
+    # ---- Sector / industry peers (colored Z / M badges) ----
+    section("Peers")
     peers, sector = sector_peers(data, tk, n=5)
     if peers is None or peers.empty or not sector:
-        st.caption("No sector peer group available for this stock.")
+        st.caption("No sector/industry peer group available for this stock.")
     else:
         st.caption(
             f"Top quality names in **{sector}** (excluding this stock). "
+            "Industry used when available; otherwise sector. "
             "Z = bankruptcy risk · M = earnings-manipulation risk · "
             "🟢 ok · 🟡 caution · 🔴 elevated"
         )

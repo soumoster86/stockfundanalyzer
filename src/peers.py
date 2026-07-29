@@ -1,12 +1,25 @@
 """
-Sector peer panel
------------------
-For a given ticker, return same-sector peers ranked by quality (excluding self).
+Peer panel
+----------
+For a given ticker, return same-industry (preferred) or same-sector peers
+ranked by quality (excluding self).
 """
 
 from __future__ import annotations
 
 import pandas as pd
+
+
+def _resolve_row(data: pd.DataFrame, ticker: str, ticker_col: str = "ticker") -> pd.Series | None:
+    row = data[data[ticker_col] == ticker]
+    if row.empty:
+        bare = str(ticker).replace(".NS", "")
+        row = data[data[ticker_col].astype(str).str.replace(".NS", "", regex=False) == bare]
+    if row.empty:
+        return None
+    if "date" in row.columns:
+        return row.sort_values("date").iloc[-1]
+    return row.iloc[-1]
 
 
 def sector_peers(
@@ -16,30 +29,51 @@ def sector_peers(
     quality_col: str = "quality_score",
     ticker_col: str = "ticker",
     sector_col: str = "sector",
+    industry_col: str = "industry",
+    prefer_industry: bool = True,
 ) -> tuple[pd.DataFrame, str | None]:
     """
-    Return (peer_frame, sector_name).
+    Return (peer_frame, group_label).
+
+    Prefers industry peers when `industry` is populated and has at least 2
+    other names; otherwise falls back to sector.
 
     peer_frame columns when available: ticker, quality_score, red_flag_count,
-    pe, roe, rank_in_sector. Empty frame if no sector or no peers.
+    pe, roe, rank_in_sector. Empty frame if no group or no peers.
     """
     if data is None or data.empty or ticker_col not in data.columns:
         return pd.DataFrame(), None
 
-    row = data[data[ticker_col] == ticker]
-    if row.empty:
-        # try strip .NS match
-        bare = str(ticker).replace(".NS", "")
-        row = data[data[ticker_col].astype(str).str.replace(".NS", "", regex=False) == bare]
-    if row.empty:
+    latest = _resolve_row(data, ticker, ticker_col)
+    if latest is None:
         return pd.DataFrame(), None
 
-    latest = row.sort_values("date").iloc[-1] if "date" in row.columns else row.iloc[-1]
-    if sector_col not in data.columns or pd.isna(latest.get(sector_col)):
-        return pd.DataFrame(), None
+    group_col = None
+    group_val = None
+    group_label = None
 
-    sector = latest[sector_col]
-    peers = data[data[sector_col] == sector].copy()
+    if (
+        prefer_industry
+        and industry_col in data.columns
+        and pd.notna(latest.get(industry_col))
+    ):
+        ind = latest[industry_col]
+        ind_peers = data[data[industry_col] == ind]
+        if "date" in ind_peers.columns:
+            ind_peers = ind_peers.sort_values("date").groupby(ticker_col, as_index=False).tail(1)
+        n_others = (ind_peers[ticker_col] != latest[ticker_col]).sum()
+        if n_others >= 2:
+            group_col, group_val = industry_col, ind
+            group_label = f"Industry: {ind}"
+
+    if group_col is None:
+        if sector_col not in data.columns or pd.isna(latest.get(sector_col)):
+            return pd.DataFrame(), None
+        group_col = sector_col
+        group_val = latest[sector_col]
+        group_label = str(group_val)
+
+    peers = data[data[group_col] == group_val].copy()
     if "date" in peers.columns:
         peers = peers.sort_values("date").groupby(ticker_col, as_index=False).tail(1)
 
@@ -64,30 +98,28 @@ def sector_peers(
         ]
         if c in others.columns
     ]
-    return others[cols].reset_index(drop=True), str(sector)
+    return others[cols].reset_index(drop=True), group_label
 
 
 def peer_context_line(data: pd.DataFrame, ticker: str) -> str:
-    peers, sector = sector_peers(data, ticker, n=1)
-    if not sector:
-        return "No sector peers available."
-    # full sector size
+    peers, group_label = sector_peers(data, ticker, n=1)
+    if not group_label:
+        return "No sector/industry peers available."
     full, _ = sector_peers(data, ticker, n=10_000)
-    # rank of this ticker
-    row = data[data["ticker"] == ticker]
-    if row.empty:
-        return f"Sector: {sector}"
-    latest = row.iloc[-1]
+    n = len(full) + 1  # peers exclude self
+    latest = _resolve_row(data, ticker)
+    if latest is None:
+        return f"{group_label}"
     q = latest.get("quality_score")
-    # recompute rank including self
-    sec = data[data["sector"] == sector] if "sector" in data.columns else data.iloc[0:0]
-    if "date" in sec.columns:
-        sec = sec.sort_values("date").groupby("ticker", as_index=False).tail(1)
-    if "quality_score" in sec.columns and len(sec):
-        sec = sec.sort_values("quality_score", ascending=False, na_position="last")
-        ranks = {t: i + 1 for i, t in enumerate(sec["ticker"])}
-        r = ranks.get(ticker)
-        n = len(sec)
-        if r and pd.notna(q):
-            return f"#{r} of {n} in **{sector}** (quality {float(q):.1f})"
-    return f"Sector: **{sector}**"
+    # Rank among full group including self
+    if "quality_score" in data.columns:
+        # Rebuild full ranked group the same way sector_peers does
+        full_inc, _ = sector_peers(data, ticker, n=10_000, prefer_industry=True)
+        # sector_peers excludes self — estimate rank from quality among peers + self
+        better = 0
+        if pd.notna(q) and not full_inc.empty and "quality_score" in full_inc.columns:
+            better = int((full_inc["quality_score"] > float(q)).sum())
+        r = better + 1
+        if pd.notna(q):
+            return f"#{r} of {n} in **{group_label}** (quality {float(q):.1f})"
+    return f"**{group_label}**"

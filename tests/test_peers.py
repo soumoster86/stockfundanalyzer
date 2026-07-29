@@ -50,4 +50,43 @@ def test_peer_context_line():
     df["date"] = pd.to_datetime(df["date"])
     scored = enrich(df)
     line = peer_context_line(scored, "TICKER1")
-    assert "sector" in line.lower() or "Sector" in line or "#" in line
+    assert "sector" in line.lower() or "Sector" in line or "#" in line or "Industry" in line
+
+
+def test_industry_preferred_over_sector():
+    rows = []
+    for i, (t, ind) in enumerate(
+        [
+            ("A", "IT Services"),
+            ("B", "IT Services"),
+            ("C", "IT Services"),
+            ("D", "Software Product"),
+            ("E", "Software Product"),
+            ("F", "Software Product"),
+        ]
+    ):
+        rows.append(
+            {
+                "ticker": t,
+                "date": "2020-03-31",
+                "sector": "Technology",
+                "industry": ind,
+                "roe": 10 + i,
+                "pe": 20 - i,
+                "revenue_growth": 0.1,
+                "net_margin": 10,
+                "operating_margin": 12,
+                "gross_margin": 30,
+                "debt_to_equity": 0.5,
+                "interest_coverage": 5,
+                "current_ratio": 1.5,
+                "cash_position": 100,
+            }
+        )
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    scored = enrich(df)
+    peers, label = sector_peers(scored, "A", n=5)
+    assert label and "IT Services" in label
+    assert set(peers["ticker"]) <= {"B", "C"}
+    assert "D" not in peers["ticker"].values

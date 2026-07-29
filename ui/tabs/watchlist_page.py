@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from src.alerts import alert_summary, evaluate_watchlist_alerts
 from src.quality_score import CONCEPT_TOOLTIPS, score_label
 from src.watchlist import (
     ERROR_KEY,
@@ -237,17 +238,103 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
             remove_ticker(st.session_state, rm_tk)
             st.rerun()
 
-    # Sector mix
+    # Alerts (monitoring rules)
+    st.markdown("**Alerts**")
+    with st.expander("Alert thresholds", expanded=False):
+        a1, a2, a3 = st.columns(3)
+        min_q = a1.number_input(
+            "Min quality",
+            min_value=0.0,
+            max_value=100.0,
+            value=50.0,
+            step=5.0,
+            key="wl_alert_min_q",
+            help="Alert when quality falls below this.",
+        )
+        max_flags = a2.number_input(
+            "Max red flags",
+            min_value=0,
+            max_value=20,
+            value=0,
+            step=1,
+            key="wl_alert_max_flags",
+            help="Alert when flag count exceeds this.",
+        )
+        max_f = a3.number_input(
+            "Weak F-score ≤",
+            min_value=0,
+            max_value=9,
+            value=3,
+            step=1,
+            key="wl_alert_max_f",
+            help="Alert when Piotroski F is at or below this (needs enough tests).",
+        )
+    alerts = evaluate_watchlist_alerts(
+        sub,
+        tickers=wl,
+        rules={
+            "min_quality": float(min_q),
+            "max_red_flags": int(max_flags),
+            "max_f_score_low": int(max_f),
+        },
+    )
+    asum = alert_summary(alerts)
+    st.markdown(
+        badge_row(
+            [
+                (f"{asum['high']} high", "Red" if asum["high"] else "Green"),
+                (f"{asum['medium']} medium", "Yellow" if asum["medium"] else "Green"),
+                (f"{asum['low']} low", "Moderate" if asum["low"] else "Green"),
+                (f"{asum['names']} names", "Moderate"),
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
+    if alerts.empty:
+        st.success("No alerts on the current watchlist with these thresholds.")
+    else:
+        show_a = alerts.copy()
+        show_a["ticker"] = show_a["ticker"].astype(str).str.replace(".NS", "", regex=False)
+        st.dataframe(
+            show_a.rename(
+                columns={
+                    "ticker": "Ticker",
+                    "severity": "Severity",
+                    "code": "Rule",
+                    "message": "Message",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # Sector mix / concentration
     if "sector" in sub.columns and sub["sector"].notna().any():
-        st.markdown("**Sector mix**")
+        st.markdown("**Sector mix & concentration**")
         mix = (
             sub.groupby("sector", dropna=False)
             .agg(Names=("ticker", "nunique"), Avg_quality=("quality_score", "mean"))
             .reset_index()
             .sort_values("Names", ascending=False)
         )
+        mix["Weight_%"] = (mix["Names"] / mix["Names"].sum() * 100).round(1)
+        top_w = float(mix["Weight_%"].iloc[0]) if len(mix) else 0.0
+        if top_w >= 50 and len(mix) > 1:
+            st.warning(
+                f"Concentration: **{mix.iloc[0]['sector']}** is {top_w:.0f}% of the list."
+            )
         st.bar_chart(mix.set_index("sector")["Names"], height=220)
         st.dataframe(mix, use_container_width=True, hide_index=True)
+
+    # Market-cap mix when available
+    if "mcap_bucket" in sub.columns and (sub["mcap_bucket"] != "Unknown").any():
+        st.markdown("**Market-cap mix**")
+        cap_mix = (
+            sub.groupby("mcap_bucket", dropna=False)
+            .agg(Names=("ticker", "nunique"), Avg_quality=("quality_score", "mean"))
+            .reset_index()
+        )
+        st.dataframe(cap_mix, use_container_width=True, hide_index=True)
 
     # Quality labels strip
     st.caption(

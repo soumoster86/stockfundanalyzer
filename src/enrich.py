@@ -18,6 +18,7 @@ from src.institutional_scores import (
     compute_beneish,
     compute_piotroski,
 )
+from src.market_buckets import assign_market_cap_bucket
 from src.quality_score import METRIC_CONFIG, build_config, compute_quality_score, quality_history
 from src.red_flags import detect_red_flags
 
@@ -95,6 +96,8 @@ def enrich(df: pd.DataFrame, use_sector: bool = False, config=None) -> pd.DataFr
     df = compute_quality_score(df, group_cols=group, config=config)
     df = df.drop(columns=["_snapshot"], errors="ignore")
     df = blend_with_quality(df)
+    # Market-cap buckets for ranking filters (no-op if market_cap missing)
+    df = assign_market_cap_bucket(df)
     return df
 
 

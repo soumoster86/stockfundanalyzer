@@ -177,11 +177,15 @@ Save custom combos under **Save / delete custom screen**.
             """
 **Watchlist**
 - Add from Report (☆) or Ranking (**Add to watchlist**).  
-- See avg quality, flags, sector mix.  
+- See avg quality, flags, sector mix, and **alerts** (quality, flags, Z/M, F).  
 - Default storage is this browser session; enable Supabase secrets for a durable
   per-user list (see Watchlist page expander / README).  
 - Import/export CSV (`ticker` column) as backup or migration.  
 - Open or remove names from this page.
+
+**Report extras**
+- Download a **research note** (Markdown) for any stock.  
+- Peers prefer **industry** when that column exists; otherwise sector.
 
 **Compare**
 - Choose 2–5 stocks.  

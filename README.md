@@ -215,13 +215,18 @@ governance CSV from the sidebar (template download provided). Columns:
 
 ## Watchlist, screens & peers
 
-- **Watchlist** page — quality snapshot, sector mix, open/remove, CSV
-  import/export. Storage is **session-only by default**; enable Supabase for a
-  durable per-user list (see below).
+- **Watchlist** page — quality snapshot, **alerts** (low quality, red flags,
+  Z/M risk, weak F-score, data warnings), sector concentration, market-cap mix,
+  open/remove, CSV import/export. Storage is **session-only by default**; enable
+  Supabase for a durable per-user list (see below).
 - **Screens** on Universe Ranking — built-in presets (Clean quality, Value
   quality, Low leverage, Watchlist only) plus save-your-own filter bundles.
-- **Sector peers** on the Single Stock Report — top quality names in the same
-  sector with one-click open.
+  **Market-cap buckets** (Large / Mid / Small / Micro) when `market_cap` is
+  present (fetcher provides it).
+- **Peers** on the Single Stock Report — top quality names in the same
+  **industry** when available, else **sector**, with one-click open.
+- **Research note** download on the Report tab (Markdown one-pager you can
+  share or convert to PDF offline).
 
 ### Durable watchlists (optional Supabase)
 
