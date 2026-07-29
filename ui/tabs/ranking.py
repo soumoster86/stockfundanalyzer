@@ -1,4 +1,4 @@
-"""Universe Ranking tab."""
+"""Universe Ranking tab — results first; filters in a collapsed drawer."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def render_ranking(data: pd.DataFrame) -> None:
     section("Multi-factor ranking")
     st.caption(
         "Latest fiscal-year figures, ranked together. "
-        "Use **screens** for repeatable filters · "
+        "Open **Screen & filters** to change presets · "
         "Z: bankruptcy risk · M: earnings-manipulation risk · "
         "🟢 ok · 🟡 caution · 🔴 elevated risk"
     )
@@ -45,7 +45,8 @@ def render_ranking(data: pd.DataFrame) -> None:
     else:
         wq, w_ml = 1.0, 0.0
         st.caption(
-            "Ranking is pure quality (no ML scores yet). Train and score in **Train Model**."
+            "Ranking is pure quality (no ML scores yet). "
+            "Train and score under **Tools → Train Model**."
         )
     ranked = rank_universe(data, w_quality=wq, w_ml=w_ml, as_of_date=None)
 
@@ -62,20 +63,6 @@ def render_ranking(data: pd.DataFrame) -> None:
     else:
         m4.metric("Clean (0 flags)", int((ranked["red_flag_count"] == 0).sum()))
 
-    with st.expander("📊 Score distribution", expanded=False):
-        vals = ranked["composite_score"].dropna()
-        if len(vals):
-            bins = np.arange(0, 105, 5)
-            counts, edges = np.histogram(vals, bins=bins)
-            hist_df = pd.DataFrame(
-                {"count": counts},
-                index=[
-                    f"{int(edges[i])}-{int(edges[i + 1])}" for i in range(len(counts))
-                ],
-            )
-            st.bar_chart(hist_df, height=200)
-
-    # ---- Compact screener toolbar (dense rows, no tall empty columns) ----
     screens = list_screens(st.session_state)
     screen_names = list(screens.keys())
     has_sector_col = "sector" in ranked.columns
@@ -89,25 +76,22 @@ def render_ranking(data: pd.DataFrame) -> None:
         "Debt/Equity (low→high)": ("debt_to_equity", True),
         "Revenue growth": ("revenue_growth", False),
     }
-
     has_mcap = "mcap_bucket" in ranked.columns and (
         ranked["mcap_bucket"].fillna("Unknown") != "Unknown"
     ).any()
 
-    # Row 1: preset + search + sector (+ market-cap when present)
-    r1a, r1b, r1c, r1d = st.columns([1.3, 1.0, 1.2, 1.0])
-    with r1a:
+    # ---- Always-visible: quick controls (screen + search + sort + show) ----
+    q1, q2, q3, q4 = st.columns([1.4, 1.2, 1.0, 0.9])
+    with q1:
         screen_name = st.selectbox(
             "Screen",
             screen_names,
-            help="Filter preset. Choosing a screen resets thresholds & flag/data filters.",
+            help="Filter preset. Open Screen & filters for thresholds.",
             key="rank_screen",
         )
     screen = screens[screen_name]
 
-    # When the Screen preset changes, push its defaults into widget session keys
-    # BEFORE those widgets are created. Otherwise Streamlit keeps old values and
-    # "Clean quality" / "Value quality" appear broken (description changes, filters don't).
+    # Sync preset defaults into widget keys before those widgets are created
     if st.session_state.get("_last_rank_screen") != screen_name:
         st.session_state["rank_min_q"] = float(screen.get("min_quality") or 0.0)
         st.session_state["rank_max_pe"] = float(screen.get("max_pe") or 0.0)
@@ -116,97 +100,187 @@ def render_ranking(data: pd.DataFrame) -> None:
         st.session_state["rank_data"] = screen.get("rel_filter", "All")
         st.session_state["rank_top_pct"] = float(screen.get("top_pct") or 0.0)
         st.session_state["_last_rank_screen"] = screen_name
-    # Ensure new widget keys exist even if screen name was already synced
     if "rank_top_pct" not in st.session_state:
         st.session_state["rank_top_pct"] = float(screen.get("top_pct") or 0.0)
 
-    with r1b:
-        search = st.text_input(
-            "Search", "", placeholder="e.g. TCS", key="rank_search"
-        ).strip().upper()
-    with r1c:
-        if has_sector_col:
-            sectors = ["All sectors"] + sorted(
-                ranked["sector"].dropna().unique().tolist()
-            )
-            sector_pick = st.selectbox("Sector", sectors, key="rank_sector")
-        else:
-            sector_pick = "All sectors"
-            st.selectbox("Sector", ["All sectors"], disabled=True, key="rank_sector_na")
-    with r1d:
-        if has_mcap:
-            buckets = ["All"] + [
-                b
-                for b in ("Large", "Mid", "Small", "Micro")
-                if b in set(ranked["mcap_bucket"].dropna().unique())
-            ]
-            mcap_pick = st.selectbox(
-                "Market cap",
-                buckets,
-                key="rank_mcap",
-                help="Large / Mid / Small / Micro from market_cap (INR-oriented defaults).",
-            )
-        else:
-            mcap_pick = "All"
-            st.selectbox(
-                "Market cap",
-                ["All"],
-                disabled=True,
-                key="rank_mcap_na",
-                help="Needs a market_cap column in the fundamentals panel.",
-            )
-
-    # Row 2: thresholds (values come from session after screen sync above)
-    t1, t2, t3, t4 = st.columns(4)
-    with t1:
-        min_quality = st.number_input(
-            "Min quality",
-            min_value=0.0,
-            max_value=100.0,
-            step=5.0,
-            key="rank_min_q",
-            help="Absolute quality floor. Use 0 with Top % for relative screens.",
+    with q2:
+        search = (
+            st.text_input("Search", "", placeholder="e.g. TCS", key="rank_search")
+            .strip()
+            .upper()
         )
-    with t2:
-        max_pe = st.number_input(
-            "Max P/E (0=off)",
-            min_value=0.0,
-            max_value=500.0,
-            step=1.0,
-            key="rank_max_pe",
-        )
-    with t3:
-        max_de = st.number_input(
-            "Max D/E (0=off)",
-            min_value=0.0,
-            max_value=20.0,
-            step=0.1,
-            key="rank_max_de",
-        )
-    with t4:
-        top_pct = st.number_input(
-            "Top % quality (0=off)",
-            min_value=0.0,
-            max_value=100.0,
-            step=5.0,
-            key="rank_top_pct",
-            help="Keep highest N% by quality among names that passed prior filters.",
-        )
-    if screen.get("description"):
-        st.caption(screen["description"])
-
-    # Row 3: flags / data / sort / show
-    f1, f2, f3, f4 = st.columns(4)
-    with f1:
-        flag_filter = st.selectbox("Flags", flag_opts, key="rank_flags")
-    with f2:
-        rel_filter = st.selectbox("Data", rel_opts, key="rank_data")
-    with f3:
+    with q3:
         sort_by = st.selectbox("Sort by", list(sort_opts.keys()), key="rank_sort")
-    with f4:
+    with q4:
         top_n = st.selectbox(
             "Show", ["Top 25", "Top 50", "Top 100", "All"], index=1, key="rank_topn"
         )
+
+    if screen.get("description"):
+        st.caption(f"**{screen_name}** — {screen['description']}")
+
+    # ---- Filter drawer (collapsed by default) ----
+    with st.expander("🔍 Screen & filters", expanded=False):
+        st.caption(
+            "Thresholds and secondary filters. Changing Screen above resets these "
+            "to the preset defaults."
+        )
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            if has_sector_col:
+                sectors = ["All sectors"] + sorted(
+                    ranked["sector"].dropna().unique().tolist()
+                )
+                sector_pick = st.selectbox("Sector", sectors, key="rank_sector")
+            else:
+                sector_pick = "All sectors"
+                st.selectbox(
+                    "Sector", ["All sectors"], disabled=True, key="rank_sector_na"
+                )
+        with f2:
+            if has_mcap:
+                buckets = ["All"] + [
+                    b
+                    for b in ("Large", "Mid", "Small", "Micro")
+                    if b in set(ranked["mcap_bucket"].dropna().unique())
+                ]
+                mcap_pick = st.selectbox(
+                    "Market cap",
+                    buckets,
+                    key="rank_mcap",
+                    help="Large / Mid / Small / Micro from market_cap.",
+                )
+            else:
+                mcap_pick = "All"
+                st.selectbox(
+                    "Market cap",
+                    ["All"],
+                    disabled=True,
+                    key="rank_mcap_na",
+                    help="Needs a market_cap column in the fundamentals panel.",
+                )
+        with f3:
+            flag_filter = st.selectbox("Flags", flag_opts, key="rank_flags")
+        with f4:
+            rel_filter = st.selectbox("Data", rel_opts, key="rank_data")
+
+        t1, t2, t3, t4 = st.columns(4)
+        with t1:
+            min_quality = st.number_input(
+                "Min quality",
+                min_value=0.0,
+                max_value=100.0,
+                step=5.0,
+                key="rank_min_q",
+                help="Absolute quality floor. Use 0 with Top % for relative screens.",
+            )
+        with t2:
+            max_pe = st.number_input(
+                "Max P/E (0=off)",
+                min_value=0.0,
+                max_value=500.0,
+                step=1.0,
+                key="rank_max_pe",
+            )
+        with t3:
+            max_de = st.number_input(
+                "Max D/E (0=off)",
+                min_value=0.0,
+                max_value=20.0,
+                step=0.1,
+                key="rank_max_de",
+            )
+        with t4:
+            top_pct = st.number_input(
+                "Top % quality (0=off)",
+                min_value=0.0,
+                max_value=100.0,
+                step=5.0,
+                key="rank_top_pct",
+                help="Keep highest N% by quality among names that passed prior filters.",
+            )
+
+        active_screen = {
+            "flag_filter": flag_filter,
+            "rel_filter": rel_filter,
+            "min_quality": float(min_quality),
+            "top_pct": float(top_pct) if float(top_pct) > 0 else None,
+            "max_pe": float(max_pe) if float(max_pe) > 0 else None,
+            "max_de": float(max_de) if float(max_de) > 0 else None,
+            "watchlist_only": bool(screen.get("watchlist_only", False)),
+            "description": screen.get("description", ""),
+        }
+
+        wl = get_watchlist(st.session_state)
+        funnel = screen_funnel(ranked, active_screen, watchlist=wl)
+
+        st.markdown("**Screen funnel**")
+        if len(funnel) > 1:
+            cols = st.columns(min(len(funnel), 6))
+            for i, step in enumerate(funnel[:6]):
+                with cols[i]:
+                    delta = step["delta"]
+                    delta_txt = (
+                        "" if i == 0 else (f"{delta:+,}" if delta != 0 else "—")
+                    )
+                    st.metric(
+                        step["label"], f"{step['n']:,}", delta_txt if i else None
+                    )
+            if len(funnel) > 6:
+                extra = " → ".join(f"{s['label']} {s['n']:,}" for s in funnel[6:])
+                st.caption(f"… {extra}")
+        else:
+            st.caption(
+                f"Screen `{screen_name}`: "
+                f"{funnel[-1]['n'] if funnel else 0:,} / {len(ranked):,} stocks."
+            )
+
+        st.markdown("**Save / delete custom screen**")
+        s1, s2 = st.columns([2, 1])
+        with s1:
+            new_name = st.text_input(
+                "Name", value="", key="rank_screen_name", placeholder="My screen"
+            )
+        with s2:
+            st.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
+            if st.button("Save screen", use_container_width=True) and new_name.strip():
+                save_custom_screen(
+                    st.session_state,
+                    new_name.strip(),
+                    {
+                        **active_screen,
+                        "description": f"Custom: {new_name.strip()}",
+                    },
+                )
+                st.success(f"Saved “{new_name.strip()}”.")
+                st.rerun()
+        custom_names = [n for n in screens if n not in BUILTIN_SCREENS]
+        if custom_names:
+            d1, d2 = st.columns([2, 1])
+            with d1:
+                del_name = st.selectbox("Delete", custom_names, key="rank_del_screen")
+            with d2:
+                st.markdown(
+                    "<div style='height:1.6rem'></div>", unsafe_allow_html=True
+                )
+                if st.button("Delete", use_container_width=True):
+                    delete_custom_screen(st.session_state, del_name)
+                    st.rerun()
+
+    # Re-read filter values for use outside expander (widgets still in session)
+    # When expander widgets ran above, session keys hold the values.
+    flag_filter = st.session_state.get("rank_flags", screen.get("flag_filter", "All"))
+    rel_filter = st.session_state.get("rank_data", screen.get("rel_filter", "All"))
+    min_quality = float(st.session_state.get("rank_min_q", 0.0))
+    max_pe = float(st.session_state.get("rank_max_pe", 0.0))
+    max_de = float(st.session_state.get("rank_max_de", 0.0))
+    top_pct = float(st.session_state.get("rank_top_pct", 0.0))
+    sector_pick = st.session_state.get("rank_sector", "All sectors")
+    if not has_sector_col:
+        sector_pick = "All sectors"
+    mcap_pick = st.session_state.get("rank_mcap", "All")
+    if not has_mcap:
+        mcap_pick = "All"
 
     active_screen = {
         "flag_filter": flag_filter,
@@ -219,62 +293,13 @@ def render_ranking(data: pd.DataFrame) -> None:
         "description": screen.get("description", ""),
     }
 
-    with st.expander("Save / delete custom screen", expanded=False):
-        s1, s2 = st.columns([2, 1])
-        with s1:
-            new_name = st.text_input(
-                "Name", value="", key="rank_screen_name", placeholder="My screen"
-            )
-        with s2:
-            st.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
-            if st.button("Save screen", use_container_width=True) and new_name.strip():
-                save_custom_screen(
-                    st.session_state,
-                    new_name.strip(),
-                    {**active_screen, "description": f"Custom: {new_name.strip()}"},
-                )
-                st.success(f"Saved “{new_name.strip()}”.")
-                st.rerun()
-        custom_names = [n for n in screens if n not in BUILTIN_SCREENS]
-        if custom_names:
-            d1, d2 = st.columns([2, 1])
-            with d1:
-                del_name = st.selectbox("Delete", custom_names, key="rank_del_screen")
-            with d2:
-                st.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
-                if st.button("Delete", use_container_width=True):
-                    delete_custom_screen(st.session_state, del_name)
-                    st.rerun()
-
     wl = get_watchlist(st.session_state)
-
-    # Funnel: how many survive each filter step (proves the screener is alive)
-    funnel = screen_funnel(ranked, active_screen, watchlist=wl)
     view = apply_screen(ranked, active_screen, watchlist=wl)
     n_after_screen = len(view)
 
-    # Visual funnel chips
-    if len(funnel) > 1:
-        st.markdown("**Screen funnel**")
-        cols = st.columns(min(len(funnel), 6))
-        for i, step in enumerate(funnel[:6]):
-            with cols[i]:
-                delta = step["delta"]
-                delta_txt = (
-                    ""
-                    if i == 0
-                    else (f"{delta:+,}" if delta != 0 else "—")
-                )
-                st.metric(step["label"], f"{step['n']:,}", delta_txt if i else None)
-        if len(funnel) > 6:
-            extra = " → ".join(f"{s['label']} {s['n']:,}" for s in funnel[6:])
-            st.caption(f"… {extra}")
-    else:
-        st.caption(f"**Screen `{screen_name}`:** {n_after_screen:,} / {len(ranked):,} stocks.")
-
     if search:
         view = view[view["ticker"].str.upper().str.contains(search)]
-    if sector_pick != "All sectors" and has_sector_col:
+    if sector_pick != "All sectors" and has_sector_col and "sector" in view.columns:
         view = view[view["sector"] == sector_pick]
     if mcap_pick != "All":
         view = filter_by_bucket(view, mcap_pick)
@@ -286,23 +311,40 @@ def render_ranking(data: pd.DataFrame) -> None:
     limit_map = {"Top 25": 25, "Top 50": 50, "Top 100": 100, "All": len(view)}
     view = view.head(limit_map[top_n])
 
-    if total_matched != n_after_screen:
-        st.caption(
-            f"After search/sector: **{total_matched:,}** names "
-            f"(showing {min(total_matched, limit_map[top_n]):,})."
-        )
+    # Compact active-filter summary (no full funnel outside drawer)
+    bits = [f"Screen **{screen_name}**", f"{n_after_screen:,} pass filters"]
+    if search:
+        bits.append(f"search `{search}`")
+    if sector_pick != "All sectors":
+        bits.append(str(sector_pick))
+    if mcap_pick != "All":
+        bits.append(f"mcap {mcap_pick}")
+    bits.append(f"showing {min(total_matched, limit_map[top_n]):,}")
+    st.caption(" · ".join(bits) + " · edit in **Screen & filters**")
 
     if screen_name != "All (default)" and n_after_screen == 0:
         st.warning(
-            f"No stocks match **{screen_name}**. Loosen Min quality / Flags / Data, "
-            "or try **Top 20% quality** (relative) instead of a high absolute Q cut."
+            f"No stocks match **{screen_name}**. Open **Screen & filters** and "
+            "loosen Min quality / Flags / Data, or try **Top 20% quality**."
         )
     elif "elite" in screen_name.lower() and 0 < n_after_screen <= 15:
         st.info(
-            f"**{screen_name}** is intentionally strict. Only **{n_after_screen}** "
-            "name(s) pass — the funnel above shows where names drop off. "
-            "For a larger shortlist use **Clean quality** (Q≥55) or **Top 20% quality**."
+            f"**{screen_name}** is intentionally strict ({n_after_screen} names). "
+            "See the funnel inside **Screen & filters**, or use **Clean quality**."
         )
+
+    with st.expander("📊 Score distribution", expanded=False):
+        vals = ranked["composite_score"].dropna()
+        if len(vals):
+            bins = np.arange(0, 105, 5)
+            counts, edges = np.histogram(vals, bins=bins)
+            hist_df = pd.DataFrame(
+                {"count": counts},
+                index=[
+                    f"{int(edges[i])}-{int(edges[i + 1])}" for i in range(len(counts))
+                ],
+            )
+            st.bar_chart(hist_df, height=200)
 
     candidate_cols = ["rank", "ticker"]
     if has_sector_col:
@@ -327,12 +369,12 @@ def render_ranking(data: pd.DataFrame) -> None:
     ]
     show = [c for c in candidate_cols if c in view.columns]
     disp = view[show].reset_index(drop=True).copy()
-    # Keep full ticker for navigation; display strip .NS
     disp["_full_ticker"] = disp["ticker"]
     disp["ticker"] = disp["ticker"].str.replace(".NS", "", regex=False)
-    # Growth stored as decimals → show as percent points (0.12 → 12.0)
     if "revenue_growth" in disp.columns:
-        disp["revenue_growth"] = pd.to_numeric(disp["revenue_growth"], errors="coerce") * 100.0
+        disp["revenue_growth"] = (
+            pd.to_numeric(disp["revenue_growth"], errors="coerce") * 100.0
+        )
     if "f_score" in disp.columns:
         disp["f_score"] = disp["f_score"].apply(
             lambda x: f"{int(x)}" if pd.notna(x) else "–"
@@ -356,8 +398,12 @@ def render_ranking(data: pd.DataFrame) -> None:
         )
 
     colcfg = {
-        "rank": st.column_config.NumberColumn("#", width="small", help="Position in the ranking."),
-        "ticker": st.column_config.TextColumn("Ticker", width="small", help="Stock symbol (NSE)."),
+        "rank": st.column_config.NumberColumn(
+            "#", width="small", help="Position in the ranking."
+        ),
+        "ticker": st.column_config.TextColumn(
+            "Ticker", width="small", help="Stock symbol (NSE)."
+        ),
         "composite_score": st.column_config.ProgressColumn(
             "Score",
             min_value=0,
@@ -372,8 +418,12 @@ def render_ranking(data: pd.DataFrame) -> None:
             format="%.1f",
             help=CONCEPT_TOOLTIPS["quality_score"],
         ),
-        "roe": st.column_config.NumberColumn("ROE", format="%.1f", help=METRIC_TOOLTIPS["roe"]),
-        "pe": st.column_config.NumberColumn("P/E", format="%.1f", help=METRIC_TOOLTIPS["pe"]),
+        "roe": st.column_config.NumberColumn(
+            "ROE", format="%.1f", help=METRIC_TOOLTIPS["roe"]
+        ),
+        "pe": st.column_config.NumberColumn(
+            "P/E", format="%.1f", help=METRIC_TOOLTIPS["pe"]
+        ),
         "debt_to_equity": st.column_config.NumberColumn(
             "D/E", format="%.2f", help=METRIC_TOOLTIPS["debt_to_equity"]
         ),
@@ -383,24 +433,20 @@ def render_ranking(data: pd.DataFrame) -> None:
         "revenue_growth": st.column_config.NumberColumn(
             "Rev gr %",
             format="%.1f",
-            help="YoY revenue growth in percent points (12 = 12%). Stored as decimals in CSV.",
+            help="YoY revenue growth in percent points (12 = 12%).",
         ),
         "f_score": st.column_config.TextColumn(
-            "F",
-            width="small",
-            help="Piotroski F-Score (0–9).",
+            "F", width="small", help="Piotroski F-Score (0–9)."
         ),
         "z_band": st.column_config.TextColumn(
             "Altman Z",
             width="medium",
-            help="Bankruptcy risk. 🟢 Safe (Z>3) · 🟡 Caution (1.8–3) · 🔴 Distress (Z<1.8).",
+            help="Bankruptcy risk. 🟢 Safe · 🟡 Caution · 🔴 Distress.",
         ),
         "m_band": st.column_config.TextColumn(
             "Beneish M",
             width="medium",
-            help="Earnings-manipulation model (Beneish). "
-                 "🟢 Unlikely (M≤−2.22) · 🟡 Caution (−2.22<M≤−1.78) · "
-                 "🔴 Likely manip. (M>−1.78). Not a proven fraud flag — review filings.",
+            help="Earnings-manipulation model. Not a proven fraud flag.",
         ),
         "red_flag_count": st.column_config.TextColumn(
             "Flags", width="small", help=CONCEPT_TOOLTIPS["red_flags"]
@@ -437,7 +483,6 @@ def render_ranking(data: pd.DataFrame) -> None:
         column_config=colcfg,
     )
 
-    # Click-through: open report for a ticker in the current view
     if len(disp):
         options = list(disp["ticker"])
         full_map = dict(zip(disp["ticker"], disp["_full_ticker"]))
@@ -452,8 +497,6 @@ def render_ranking(data: pd.DataFrame) -> None:
             if pick != "—" and st.button("➡️ Open report", key="rank_open_btn"):
                 st.session_state["report_ticker"] = full_map.get(pick, pick)
                 st.session_state["_report_jump"] = True
-                # Do not set nav_page here — radio widget already owns that key.
-                # Apply on next run before the radio is created.
                 st.session_state["_pending_nav"] = "Single Stock Report"
                 st.rerun()
         with b2:

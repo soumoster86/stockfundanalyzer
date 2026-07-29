@@ -24,6 +24,14 @@ from src.quality_score import (
 )
 from src.sample_data import COLUMN_DOCS, sample_csv_bytes, sample_dataframe
 from src.schema import prepare_panel
+from ui.nav import (
+    ALL_PAGES,
+    NAV_BY_MODE,
+    NAV_MODES,
+    SHOW_UNIVERSE_BANNER,
+    ensure_page_in_mode,
+    resolve_pending_nav,
+)
 from ui.tabs import (
     render_compare,
     render_ranking,
@@ -34,16 +42,6 @@ from ui.tabs import (
     render_watchlist,
 )
 from ui.theme import inject_global_css
-
-NAV_PAGES = [
-    "Single Stock Report",
-    "Universe Ranking",
-    "Watchlist",
-    "Compare",
-    "Sector Overview",
-    "Train Model",
-    "Tutorial",
-]
 
 # ---------------------------------------------------------------------------
 # Page config + auth
@@ -503,34 +501,45 @@ with st.expander("📋 Data coverage details", expanded=False):
         "fields — re-fetch or refresh if coverage is low."
     )
 
-_n_stocks = data["ticker"].nunique()
-_n_sectors = data["sector"].nunique() if "sector" in data.columns else 0
-_avg_q = data["quality_score"].mean() if "quality_score" in data.columns else float("nan")
-_warned = int(data["data_warning"].sum()) if "data_warning" in data.columns else 0
-b1, b2, b3, b4 = st.columns(4)
-b1.metric("Universe", f"{_n_stocks:,} stocks")
-b2.metric("Sectors", _n_sectors if _n_sectors else "—")
-b3.metric("Avg quality", f"{_avg_q:.1f}" if pd.notna(_avg_q) else "—")
-b4.metric("Data warnings", _warned)
-st.divider()
+# Navigation: apply cross-page jumps *before* mode/page widgets are created
+# (Streamlit forbids mutating a widget key after the widget is instantiated).
+resolve_pending_nav(st.session_state)
+if "nav_mode" not in st.session_state:
+    st.session_state["nav_mode"] = NAV_MODES[0]
+if "nav_page" not in st.session_state or st.session_state["nav_page"] not in ALL_PAGES:
+    st.session_state["nav_page"] = NAV_BY_MODE[NAV_MODES[0]][0]
 
-# Navigation radio uses key "nav_page". Streamlit forbids changing that key
-# after the widget is created in the same run, so page jumps (Ranking → Report)
-# write to "_pending_nav" and we apply it *here* before instantiating the radio.
-if "_pending_nav" in st.session_state:
-    pending = st.session_state.pop("_pending_nav")
-    if pending in NAV_PAGES:
-        st.session_state["nav_page"] = pending
-elif "nav_page" not in st.session_state:
-    st.session_state["nav_page"] = NAV_PAGES[0]
-
-page = st.radio(
-    "Navigate",
-    NAV_PAGES,
+mode = st.radio(
+    "Mode",
+    NAV_MODES,
     horizontal=True,
-    label_visibility="collapsed",
-    key="nav_page",
+    key="nav_mode",
+    help="Research = daily work · Context = compare & sectors · Tools = train & tutorial",
 )
+page = ensure_page_in_mode(st.session_state, mode)
+page_options = NAV_BY_MODE[mode]
+page = st.radio(
+    "Page",
+    page_options,
+    horizontal=True,
+    key="nav_page",
+    label_visibility="collapsed",
+)
+
+# Universe metrics only where they help (not on deep single-stock report / tools)
+if page in SHOW_UNIVERSE_BANNER:
+    _n_stocks = data["ticker"].nunique()
+    _n_sectors = data["sector"].nunique() if "sector" in data.columns else 0
+    _avg_q = (
+        data["quality_score"].mean() if "quality_score" in data.columns else float("nan")
+    )
+    _warned = int(data["data_warning"].sum()) if "data_warning" in data.columns else 0
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("Universe", f"{_n_stocks:,} stocks")
+    b2.metric("Sectors", _n_sectors if _n_sectors else "—")
+    b3.metric("Avg quality", f"{_avg_q:.1f}" if pd.notna(_avg_q) else "—")
+    b4.metric("Data warnings", _warned)
+    st.divider()
 
 if page == "Single Stock Report":
     render_report(data, history_panel, custom_config)

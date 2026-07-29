@@ -106,17 +106,19 @@ promoter pledge, insider, auditor, related-party.
     with st.expander("🧭 2. Navigate the app", expanded=False):
         st.markdown(
             """
-Use the **pill bar** under the header:
+Navigation is **two levels**:
 
-| Page | Use it for |
-|------|------------|
-| **Single Stock Report** | Deep dive on one name |
-| **Universe Ranking** | Leaderboard + screens + export |
-| **Watchlist** | Your short list & portfolio snapshot |
-| **Compare** | 2–5 stocks side by side |
-| **Sector Overview** | Where quality clusters by sector |
-| **Train Model** | ML outperformance (needs labels) |
-| **Tutorial** | This guide |
+1. **Mode** — Research · Context · Tools  
+2. **Page** within that mode  
+
+| Mode | Pages |
+|------|--------|
+| **Research** | Single Stock Report · Universe Ranking · Watchlist |
+| **Context** | Compare · Sector Overview |
+| **Tools** | Train Model · Tutorial |
+
+**Report** uses sub-tabs: Overview · Forensics · Drivers · Context.  
+**Ranking** keeps the table up front; open **Screen & filters** for thresholds and funnel.
 
 **Sidebar:** data source, scoring weight presets, sector peer ranking toggle, logout.
             """
@@ -127,18 +129,12 @@ Use the **pill bar** under the header:
         st.markdown(
             """
 1. Pick a **ticker** (or open one from Ranking / Watchlist / peers).  
-2. Read the **status badges** (quality band, flags, F / Z / M).  
-3. **Quality gauge** — 0–100 composite; label Strong / Average / Weak etc.  
-4. **Institutional scores**
-   - **Piotroski F (0–9):** financial health checklist — expand *F-Score test breakdown* for pass/fail.  
-   - **Altman Z:** bankruptcy risk — 🟢 Safe · 🟡 Caution · 🔴 Distress.  
-   - **Beneish M:** earnings-manipulation model — 🟢 Unlikely · 🟡 Caution · 🔴 Likely manip.  
-5. **Why this score?** — top strengths / weakest metrics vs peers.  
-6. **Category radar** — Growth, Profit, Strength, Shareholder, Value.  
-7. **Quality trend** — multi-year score path (needs ≥2 fiscal years).  
-8. **Red flags** — rule-based issues (not the same as Beneish M).  
-9. **Sector peers** — top quality names in the same sector; open a peer report.  
-10. **☆ Watchlist** — save the name for later.
+2. Read the **status badges** (always visible).  
+3. **Overview** — gauge, key metrics, completeness.  
+4. **Forensics** — F / Z / M cards, data warnings, red flags.  
+5. **Drivers** — why this score, strengths/drags, category radar.  
+6. **Context** — quality trend and industry/sector peers.  
+7. **☆ Watchlist** / **Research note** — top of the page.
             """
         )
 
@@ -146,7 +142,11 @@ Use the **pill bar** under the header:
     with st.expander("🏆 4. Universe Ranking & screens", expanded=False):
         st.markdown(
             """
+**Leaderboard first:** table + search/sort. Open **Screen & filters** for sector,
+market cap, thresholds, funnel, and saving custom screens.
+
 **Leaderboard:** one row per stock (latest solid fiscal year), sorted by composite score  
+
 (quality minus red-flag penalty; optional ML blend if you trained a model).
 
 **Screen presets** (dropdown) — choosing a screen resets thresholds & flag filters:

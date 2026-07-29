@@ -188,7 +188,7 @@ def how_it_works_html() -> str:
     steps = [
         ("1", "Load data", "Auto-loads fundamentals.csv or upload your panel / demo sample."),
         ("2", "Score & filter", "Quality + red flags + F/Z/M. Screen with Clean / Value / Low leverage."),
-        ("3", "Research", "Single-stock report, peers, watchlist, compare, sector overview."),
+        ("3", "Research", "Mode → Report / Ranking / Watchlist; dig deeper with sub-tabs."),
         ("4", "Optional ML", "Add labels via build_labels, train in-app, rank with blend weights."),
     ]
     cells = []
