@@ -14,6 +14,7 @@ from src.screens import (
     delete_custom_screen,
     list_screens,
     save_custom_screen,
+    screen_funnel,
 )
 from src.watchlist import add_ticker, get_watchlist
 from ui.theme import band_text, section
@@ -108,7 +109,11 @@ def render_ranking(data: pd.DataFrame) -> None:
         st.session_state["rank_max_de"] = float(screen.get("max_de") or 0.0)
         st.session_state["rank_flags"] = screen.get("flag_filter", "All")
         st.session_state["rank_data"] = screen.get("rel_filter", "All")
+        st.session_state["rank_top_pct"] = float(screen.get("top_pct") or 0.0)
         st.session_state["_last_rank_screen"] = screen_name
+    # Ensure new widget keys exist even if screen name was already synced
+    if "rank_top_pct" not in st.session_state:
+        st.session_state["rank_top_pct"] = float(screen.get("top_pct") or 0.0)
 
     with r1b:
         search = st.text_input(
@@ -133,6 +138,7 @@ def render_ranking(data: pd.DataFrame) -> None:
             max_value=100.0,
             step=5.0,
             key="rank_min_q",
+            help="Absolute quality floor. Use 0 with Top % for relative screens.",
         )
     with t2:
         max_pe = st.number_input(
@@ -151,11 +157,16 @@ def render_ranking(data: pd.DataFrame) -> None:
             key="rank_max_de",
         )
     with t4:
-        st.markdown(
-            f'<p style="margin:1.7rem 0 0 0;font-size:0.8rem;color:#8B949E;">'
-            f'{screen.get("description") or ""}</p>',
-            unsafe_allow_html=True,
+        top_pct = st.number_input(
+            "Top % quality (0=off)",
+            min_value=0.0,
+            max_value=100.0,
+            step=5.0,
+            key="rank_top_pct",
+            help="Keep highest N% by quality among names that passed prior filters.",
         )
+    if screen.get("description"):
+        st.caption(screen["description"])
 
     # Row 3: flags / data / sort / show
     f1, f2, f3, f4 = st.columns(4)
@@ -174,6 +185,7 @@ def render_ranking(data: pd.DataFrame) -> None:
         "flag_filter": flag_filter,
         "rel_filter": rel_filter,
         "min_quality": float(min_quality),
+        "top_pct": float(top_pct) if float(top_pct) > 0 else None,
         "max_pe": float(max_pe) if float(max_pe) > 0 else None,
         "max_de": float(max_de) if float(max_de) > 0 else None,
         "watchlist_only": bool(screen.get("watchlist_only", False)),
@@ -208,8 +220,31 @@ def render_ranking(data: pd.DataFrame) -> None:
                     st.rerun()
 
     wl = get_watchlist(st.session_state)
+
+    # Funnel: how many survive each filter step (proves the screener is alive)
+    funnel = screen_funnel(ranked, active_screen, watchlist=wl)
     view = apply_screen(ranked, active_screen, watchlist=wl)
     n_after_screen = len(view)
+
+    # Visual funnel chips
+    if len(funnel) > 1:
+        st.markdown("**Screen funnel**")
+        cols = st.columns(min(len(funnel), 6))
+        for i, step in enumerate(funnel[:6]):
+            with cols[i]:
+                delta = step["delta"]
+                delta_txt = (
+                    ""
+                    if i == 0
+                    else (f"{delta:+,}" if delta != 0 else "—")
+                )
+                st.metric(step["label"], f"{step['n']:,}", delta_txt if i else None)
+        if len(funnel) > 6:
+            extra = " → ".join(f"{s['label']} {s['n']:,}" for s in funnel[6:])
+            st.caption(f"… {extra}")
+    else:
+        st.caption(f"**Screen `{screen_name}`:** {n_after_screen:,} / {len(ranked):,} stocks.")
+
     if search:
         view = view[view["ticker"].str.upper().str.contains(search)]
     if sector_pick != "All sectors" and has_sector_col:
@@ -222,42 +257,22 @@ def render_ranking(data: pd.DataFrame) -> None:
     limit_map = {"Top 25": 25, "Top 50": 50, "Top 100": 100, "All": len(view)}
     view = view.head(limit_map[top_n])
 
-    # Prove the screener is doing something (counts before search/sector narrowing)
-    bits = []
-    if active_screen.get("min_quality"):
-        bits.append(f"Q≥{active_screen['min_quality']:.0f}")
-    if active_screen.get("flag_filter") and active_screen["flag_filter"] != "All":
-        bits.append(active_screen["flag_filter"])
-    if active_screen.get("rel_filter") and active_screen["rel_filter"] != "All":
-        bits.append(active_screen["rel_filter"])
-    if active_screen.get("max_pe") is not None:
-        bits.append(f"PE≤{active_screen['max_pe']:.0f}")
-    if active_screen.get("max_de") is not None:
-        bits.append(f"D/E≤{active_screen['max_de']:.2g}")
-    if active_screen.get("watchlist_only"):
-        bits.append(f"watchlist ({len(wl)} names)")
-    filter_txt = " · ".join(bits) if bits else "no extra filters"
-    st.caption(
-        f"**Screen `{screen_name}`:** {n_after_screen:,} / {len(ranked):,} stocks match "
-        f"({filter_txt})."
-        + (
-            f" After search/sector: {total_matched:,}."
-            if total_matched != n_after_screen
-            else ""
+    if total_matched != n_after_screen:
+        st.caption(
+            f"After search/sector: **{total_matched:,}** names "
+            f"(showing {min(total_matched, limit_map[top_n]):,})."
         )
-    )
+
     if screen_name != "All (default)" and n_after_screen == 0:
         st.warning(
-            f"No stocks match **{screen_name}**. Try **All (default)** or loosen "
-            "Min quality / Flags / Data. On relative quality scores, high thresholds "
-            "(e.g. Q≥65) can match only a handful of names."
+            f"No stocks match **{screen_name}**. Loosen Min quality / Flags / Data, "
+            "or try **Top 20% quality** (relative) instead of a high absolute Q cut."
         )
-    elif screen_name == "Clean quality" and 0 < n_after_screen <= 10:
+    elif "elite" in screen_name.lower() and 0 < n_after_screen <= 15:
         st.info(
-            f"**Clean quality** is strict (Q≥65, no flags, reliable data). "
-            f"Only **{n_after_screen}** stock(s) in this universe pass — that usually "
-            "means the filter is working, not broken. Quality scores are peer-relative "
-            "and often cluster below 65."
+            f"**{screen_name}** is intentionally strict. Only **{n_after_screen}** "
+            "name(s) pass — the funnel above shows where names drop off. "
+            "For a larger shortlist use **Clean quality** (Q≥55) or **Top 20% quality**."
         )
 
     candidate_cols = ["rank", "ticker"]

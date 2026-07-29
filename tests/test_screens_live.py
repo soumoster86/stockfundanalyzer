@@ -20,10 +20,10 @@ def test_screens_are_not_noops():
     assert all_n == len(ranked)
 
     clean = apply_screen(ranked, BUILTIN_SCREENS["Clean quality"])
-    # Clean is stricter than All (min Q 65 + no flags + reliable)
+    # Clean is Q≥55 + no flags + reliable
     assert len(clean) <= all_n
     if len(clean):
-        assert (clean["quality_score"] >= 65).all()
+        assert (clean["quality_score"] >= 55).all()
         assert (clean["red_flag_count"] == 0).all()
 
     value = apply_screen(ranked, BUILTIN_SCREENS["Value quality"])

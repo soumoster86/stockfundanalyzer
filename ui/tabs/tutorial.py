@@ -154,14 +154,15 @@ Use the **pill bar** under the header:
 | Screen | Rules |
 |--------|--------|
 | **All (default)** | No extra filters |
-| **Clean quality** | Quality ≥ 65, no red flags, reliable data only |
-| **Value quality** | Quality ≥ 55, P/E ≤ 25, no red flags, reliable |
-| **Low leverage** | Quality ≥ 50, D/E ≤ 1, reliable |
+| **Clean quality** | Q≥55, no red flags, reliable (day-to-day shortlist) |
+| **Clean quality (elite)** | Q≥65, no red flags, reliable (very few names) |
+| **Top 10% / 20% quality** | Relative cut by quality percentile + reliable |
+| **Value quality** | Q≥55, P/E ≤ 25, no red flags, reliable |
+| **Low leverage** | Q≥50, D/E ≤ 1, reliable |
 | **Watchlist only** | Only names on your watchlist |
 
-After you pick a screen, check the caption:  
-`Screen "Clean quality": N / Total stocks match …`  
-That proves the filter ran. On relative scores, **Clean quality can match only a few names** — that’s expected.
+After you pick a screen, the **Screen funnel** metrics show how many names
+survive each filter step (universe → flags → reliable → Q cut → …).
 
 You can still tweak **Min quality / Max P/E / Max D/E / Flags / Data** after selecting a screen.  
 Save custom combos under **Save / delete custom screen**.

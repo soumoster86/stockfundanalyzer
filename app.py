@@ -180,6 +180,61 @@ st.sidebar.markdown(
     "(0.12 = 12%); ROE/margins are **percent points** (12 = 12%). "
     "For ML labels run `python -m src.build_labels`."
 )
+
+# Local Yahoo refresh (optional — needs yfinance + network)
+from src.refresh import refresh_fundamentals, yfinance_available
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔄 Refresh data")
+if yfinance_available():
+    _max_refresh = st.sidebar.number_input(
+        "Max tickers to refresh",
+        min_value=1,
+        max_value=5000,
+        value=100,
+        step=50,
+        help="Full universe refreshes can take a long time. Prefer stocks.csv offline "
+             "via `python -m src.fetch_fundamentals` for thousands of names.",
+        key="refresh_max_tickers",
+    )
+    if st.sidebar.button(
+        "Refresh fundamentals (Yahoo)",
+        use_container_width=True,
+        help="Re-fetch from Yahoo into fundamentals.csv (local only).",
+    ):
+        root = os.path.dirname(os.path.abspath(__file__))
+        prog = st.sidebar.progress(0.0, text="Starting…")
+        status = st.sidebar.empty()
+
+        def _cb(i, total, tkr):
+            prog.progress(min(1.0, i / max(total, 1)), text=f"{i}/{total} {tkr}")
+            status.caption(f"Fetching {tkr}…")
+
+        with st.spinner("Refreshing fundamentals from Yahoo…"):
+            # Uses stocks.csv when present; otherwise pass None (refresh will error
+            # clearly if neither stocks.csv nor tickers exist).
+            result = refresh_fundamentals(
+                root,
+                out_name="fundamentals.csv",
+                tickers=None,
+                sleep_s=0.35,
+                max_tickers=int(_max_refresh),
+                progress_cb=_cb,
+            )
+        prog.empty()
+        status.empty()
+        if result["ok"]:
+            st.sidebar.success(result["message"])
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.sidebar.error(result["message"])
+else:
+    st.sidebar.caption(
+        "Install `yfinance` locally to enable one-click refresh, or run:\n"
+        "`python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv`"
+    )
+
 if st.sidebar.button("📖 Open Tutorial", use_container_width=True):
     st.session_state["_pending_nav"] = "Tutorial"
     st.rerun()
@@ -281,7 +336,7 @@ if _date_min is not None and pd.notna(_date_min):
 st.info(
     f"**Data source:** {data_source_label}"
     + (f" · **File updated:** {_mtime_txt}" if _mtime_txt else "")
-    + f" · **Fiscal dates in file:** {_fiscal_txt}"
+    + f" · **Fiscal dates:** {_fiscal_txt}"
     + (
         " · Upload a CSV in the sidebar to override for this session."
         if uploaded is None and default_fund_path is not None
@@ -434,8 +489,20 @@ if "outperform_by_ticker" in st.session_state:
 history_panel = cached_history(raw, use_sector, weights_tuple)
 
 # ---------------------------------------------------------------------------
-# Summary banner + controlled navigation (supports ranking → report jump)
+# Summary banner + data coverage + navigation
 # ---------------------------------------------------------------------------
+from src.coverage import coverage_banner_text, coverage_detail_lines, coverage_summary
+
+_cov = coverage_summary(data, raw=raw)
+st.caption(coverage_banner_text(_cov))
+with st.expander("📋 Data coverage details", expanded=False):
+    for line in coverage_detail_lines(_cov):
+        st.markdown(f"- {line}")
+    st.caption(
+        "Sparse = <50% of core metrics filled. F/Z/M need multi-year and balance-sheet "
+        "fields — re-fetch or refresh if coverage is low."
+    )
+
 _n_stocks = data["ticker"].nunique()
 _n_sectors = data["sector"].nunique() if "sector" in data.columns else 0
 _avg_q = data["quality_score"].mean() if "quality_score" in data.columns else float("nan")
