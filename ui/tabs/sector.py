@@ -64,24 +64,28 @@ def render_sector(data: pd.DataFrame) -> None:
     st.markdown("**Average quality score by sector**")
     st.bar_chart(summary.set_index("Sector")["Avg quality"], height=300)
 
-    st.markdown("**Sector detail**")
-    st.dataframe(
-        summary,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Sector": st.column_config.TextColumn("Sector", width="medium"),
-            "Stocks": st.column_config.NumberColumn("Stocks", width="small"),
-            "Avg quality": st.column_config.ProgressColumn(
-                "Avg quality", min_value=0, max_value=100, format="%.1f"
-            ),
-            "Median quality": st.column_config.NumberColumn("Median", format="%.1f"),
-            "Best score": st.column_config.NumberColumn("Best", format="%.1f"),
-            "Avg red flags": st.column_config.NumberColumn("Avg flags", format="%.2f"),
-            "Top stock": st.column_config.TextColumn("Top stock", width="small"),
-        },
-    )
+    with st.expander("Sector detail table", expanded=False):
+        st.dataframe(
+            summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Sector": st.column_config.TextColumn("Sector", width="medium"),
+                "Stocks": st.column_config.NumberColumn("Stocks", width="small"),
+                "Avg quality": st.column_config.ProgressColumn(
+                    "Avg quality", min_value=0, max_value=100, format="%.1f"
+                ),
+                "Median quality": st.column_config.NumberColumn(
+                    "Median", format="%.1f"
+                ),
+                "Best score": st.column_config.NumberColumn("Best", format="%.1f"),
+                "Avg red flags": st.column_config.NumberColumn(
+                    "Avg flags", format="%.2f"
+                ),
+                "Top stock": st.column_config.TextColumn("Top stock", width="small"),
+            },
+        )
     st.caption(
-        "Tip: use the Sector filter in the Universe Ranking tab to drill "
+        "Tip: use the Sector filter under Ranking → Screen & filters to drill "
         "into any sector's individual stocks."
     )

@@ -346,27 +346,37 @@ def render_ranking(data: pd.DataFrame) -> None:
             )
             st.bar_chart(hist_df, height=200)
 
+    # Compact default columns; optional extras via checkbox
+    show_more = st.checkbox(
+        "Show more columns",
+        value=False,
+        key="rank_show_more_cols",
+        help="ROE, P/E, growth, data completeness, market-cap bucket, etc.",
+    )
     candidate_cols = ["rank", "ticker"]
     if has_sector_col:
         candidate_cols.append("sector")
-    if "mcap_bucket" in view.columns:
-        candidate_cols.append("mcap_bucket")
     candidate_cols += ["composite_score", "quality_score"]
     if "outperform_proba" in view.columns:
         candidate_cols.append("outperform_proba")
     candidate_cols += [
-        "roe",
-        "pe",
-        "debt_to_equity",
-        "net_margin",
-        "revenue_growth",
         "f_score",
         "z_band",
         "m_band",
         "red_flag_count",
-        "data_fields_present",
-        "data_warning_count",
     ]
+    if show_more:
+        if "mcap_bucket" in view.columns:
+            candidate_cols.append("mcap_bucket")
+        candidate_cols += [
+            "roe",
+            "pe",
+            "debt_to_equity",
+            "net_margin",
+            "revenue_growth",
+            "data_fields_present",
+            "data_warning_count",
+        ]
     show = [c for c in candidate_cols if c in view.columns]
     disp = view[show].reset_index(drop=True).copy()
     disp["_full_ticker"] = disp["ticker"]

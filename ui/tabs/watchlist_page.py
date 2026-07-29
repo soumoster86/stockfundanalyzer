@@ -1,4 +1,4 @@
-"""Watchlist portfolio page."""
+"""Watchlist portfolio page — Portfolio vs Manage & alerts tabs."""
 
 from __future__ import annotations
 
@@ -23,27 +23,26 @@ from src.watchlist_supabase import backend_status
 from ui.theme import badge_row, band_text, section
 
 
-def render_watchlist(data: pd.DataFrame) -> None:
-    section("Watchlist")
+def _render_storage_caption() -> None:
     backend = backend_name(st.session_state)
     if backend == "supabase":
         st.caption(
             "Storage: **Supabase** (per user, survives restarts). "
             "Z/M: 🟢 good · 🟡 watch · 🔴 risk."
         )
-    else:
-        st.caption(
-            "Storage: **this browser session** (ephemeral). "
-            "Configure Supabase secrets for a durable per-user list, "
-            "or download CSV as backup. Z/M: 🟢 good · 🟡 watch · 🔴 risk."
-        )
-        status = backend_status()
-        if not status["configured"]:
-            with st.expander("How to enable Supabase watchlists", expanded=False):
-                st.markdown(
-                    """
-1. Create a free project at [supabase.com](https://supabase.com).  
-2. Run the SQL in `sql/watchlist_supabase.sql` in the SQL editor.  
+        return
+    st.caption(
+        "Storage: **this browser session** (ephemeral). "
+        "Configure Supabase secrets for a durable per-user list, "
+        "or download CSV as backup. Z/M: 🟢 good · 🟡 watch · 🔴 risk."
+    )
+    status = backend_status()
+    if not status["configured"]:
+        with st.expander("How to enable Supabase watchlists", expanded=False):
+            st.markdown(
+                """
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Run the SQL in `sql/watchlist_supabase.sql` in the SQL editor.
 3. Add to `.streamlit/secrets.toml` (or Streamlit Cloud secrets):
 
 ```toml
@@ -52,38 +51,18 @@ url = "https://YOUR_PROJECT.supabase.co"
 key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
 ```
 
-4. Install: `pip install supabase`  
+4. Install: `pip install supabase`
 5. Restart the app and sign in — your list loads from Supabase.
-                    """
-                )
-        elif not status["package_installed"]:
-            st.warning("Supabase secrets found but package missing: `pip install supabase`")
+                """
+            )
+    elif not status["package_installed"]:
+        st.warning(
+            "Supabase secrets found but package missing: `pip install supabase`"
+        )
 
-    err = st.session_state.get(ERROR_KEY)
-    if err:
-        st.warning(f"Watchlist cloud sync issue (using session cache): {err}")
 
-    wl = get_watchlist(st.session_state)
-    summary = watchlist_summary(data, wl)
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Names", summary["n"])
-    c2.metric(
-        "Avg quality",
-        f"{summary['avg_quality']:.1f}" if pd.notna(summary["avg_quality"]) else "—",
-        help=CONCEPT_TOOLTIPS.get("quality_score", "Mean quality on the watchlist."),
-    )
-    c3.metric(
-        "Median quality",
-        f"{summary['median_quality']:.1f}" if pd.notna(summary["median_quality"]) else "—",
-    )
-    c4.metric(
-        "Avg flags",
-        f"{summary['avg_flags']:.1f}" if pd.notna(summary["avg_flags"]) else "—",
-    )
-
-    # Manage list
-    st.markdown("**Manage**")
+def _render_manage(data: pd.DataFrame, wl: list[str]) -> None:
+    st.caption("Add, import/export, or clear names.")
     all_tickers = sorted(data["ticker"].unique())
     m1, m2, m3 = st.columns([2, 1, 1])
     with m1:
@@ -106,11 +85,12 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
 
     up, down = st.columns(2)
     with up:
-        uploaded = st.file_uploader("Import watchlist CSV", type="csv", key="wl_import")
+        uploaded = st.file_uploader(
+            "Import watchlist CSV", type="csv", key="wl_import"
+        )
         if uploaded is not None and st.button("Load import"):
             try:
                 tickers = watchlist_from_csv(uploaded)
-                # keep only those present in universe (plus allow orphans for later)
                 set_watchlist(st.session_state, tickers)
                 st.success(f"Loaded {len(tickers)} ticker(s).")
                 st.rerun()
@@ -125,11 +105,126 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
             disabled=not wl,
         )
 
+    if wl:
+        st.markdown("**Remove one**")
+        rm_tk = st.selectbox("Remove", wl, key="wl_rm")
+        if st.button("➖ Remove from watchlist"):
+            remove_ticker(st.session_state, rm_tk)
+            st.rerun()
+    else:
+        st.info(
+            "Watchlist is empty. Add tickers above or import a CSV with a "
+            "`ticker` column."
+        )
+
+
+def _render_alerts(sub: pd.DataFrame, wl: list[str]) -> None:
+    st.caption(
+        "Monitoring rules on the current list. Adjust thresholds as needed."
+    )
+    a1, a2, a3 = st.columns(3)
+    min_q = a1.number_input(
+        "Min quality",
+        min_value=0.0,
+        max_value=100.0,
+        value=50.0,
+        step=5.0,
+        key="wl_alert_min_q",
+        help="Alert when quality falls below this.",
+    )
+    max_flags = a2.number_input(
+        "Max red flags",
+        min_value=0,
+        max_value=20,
+        value=0,
+        step=1,
+        key="wl_alert_max_flags",
+        help="Alert when flag count exceeds this.",
+    )
+    max_f = a3.number_input(
+        "Weak F-score ≤",
+        min_value=0,
+        max_value=9,
+        value=3,
+        step=1,
+        key="wl_alert_max_f",
+        help="Alert when Piotroski F is at or below this (needs enough tests).",
+    )
+    alerts = evaluate_watchlist_alerts(
+        sub,
+        tickers=wl,
+        rules={
+            "min_quality": float(min_q),
+            "max_red_flags": int(max_flags),
+            "max_f_score_low": int(max_f),
+        },
+    )
+    asum = alert_summary(alerts)
+    st.markdown(
+        badge_row(
+            [
+                (f"{asum['high']} high", "Red" if asum["high"] else "Green"),
+                (
+                    f"{asum['medium']} medium",
+                    "Yellow" if asum["medium"] else "Green",
+                ),
+                (f"{asum['low']} low", "Moderate" if asum["low"] else "Green"),
+                (f"{asum['names']} names", "Moderate"),
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
+    if alerts.empty:
+        st.success("No alerts on the current watchlist with these thresholds.")
+    else:
+        show_a = alerts.copy()
+        show_a["ticker"] = show_a["ticker"].astype(str).str.replace(
+            ".NS", "", regex=False
+        )
+        st.dataframe(
+            show_a.rename(
+                columns={
+                    "ticker": "Ticker",
+                    "severity": "Severity",
+                    "code": "Rule",
+                    "message": "Message",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+def _render_portfolio(data: pd.DataFrame, wl: list[str], summary: dict) -> None:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Names", summary["n"])
+    c2.metric(
+        "Avg quality",
+        f"{summary['avg_quality']:.1f}"
+        if pd.notna(summary["avg_quality"])
+        else "—",
+        help=CONCEPT_TOOLTIPS.get(
+            "quality_score", "Mean quality on the watchlist."
+        ),
+    )
+    c3.metric(
+        "Median quality",
+        f"{summary['median_quality']:.1f}"
+        if pd.notna(summary["median_quality"])
+        else "—",
+    )
+    c4.metric(
+        "Avg flags",
+        f"{summary['avg_flags']:.1f}" if pd.notna(summary["avg_flags"]) else "—",
+    )
+
     if not wl:
-        st.info("Watchlist is empty. Add tickers above or import a CSV with a `ticker` column.")
+        st.info(
+            "Watchlist is empty. Switch to **Manage & alerts** to add names "
+            "or import a CSV."
+        )
         return
 
-    # Heat-style table
     sub = filter_universe(data, wl)
     if sub.empty:
         st.warning(
@@ -139,11 +234,21 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
         st.write(wl)
         return
 
-    # Preserve watchlist order
     order = {t: i for i, t in enumerate(wl)}
     sub = sub.copy()
     sub["_ord"] = sub["ticker"].map(lambda t: order.get(t, 9999))
     sub = sub.sort_values(["_ord", "quality_score"], ascending=[True, False])
+
+    # Compact alert strip on portfolio (counts only)
+    alerts = evaluate_watchlist_alerts(sub, tickers=wl)
+    asum = alert_summary(alerts)
+    if asum["total"]:
+        st.caption(
+            f"⚠️ **{asum['high']}** high · **{asum['medium']}** medium · "
+            f"**{asum['low']}** low alerts — details in **Manage & alerts**."
+        )
+    else:
+        st.caption("No monitoring alerts with default thresholds.")
 
     show_cols = [
         c
@@ -165,7 +270,6 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
     disp = sub[show_cols].reset_index(drop=True)
     disp["ticker_disp"] = disp["ticker"].str.replace(".NS", "", regex=False)
 
-    st.markdown("**Portfolio snapshot**")
     if "z_band" in disp.columns:
         disp["z_band"] = disp["z_band"].map(lambda x: band_text(x, "z"))
     if "m_band" in disp.columns:
@@ -199,9 +303,10 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
     out = disp.drop(columns=["ticker"], errors="ignore").rename(
         columns={"ticker_disp": "ticker"}
     )
-    # Summary badges for the portfolio
     n_risk = int((sub["m_band"] == "Red").sum()) if "m_band" in sub.columns else 0
-    n_distress = int((sub["z_band"] == "Red").sum()) if "z_band" in sub.columns else 0
+    n_distress = (
+        int((sub["z_band"] == "Red").sum()) if "z_band" in sub.columns else 0
+    )
     st.markdown(
         badge_row(
             [
@@ -211,7 +316,8 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
                     if pd.notna(summary["avg_quality"])
                     else "Avg Q —",
                     "Strong"
-                    if pd.notna(summary["avg_quality"]) and summary["avg_quality"] >= 65
+                    if pd.notna(summary["avg_quality"])
+                    and summary["avg_quality"] >= 65
                     else "Moderate",
                 ),
                 (f"{n_distress} Z-risk", "Red" if n_distress else "Green"),
@@ -222,121 +328,46 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
     )
     st.dataframe(out, use_container_width=True, hide_index=True, column_config=colcfg)
 
-    # Per-name actions
-    st.markdown("**Open or remove**")
-    a1, a2 = st.columns(2)
-    with a1:
-        open_tk = st.selectbox("Open report", wl, key="wl_open")
-        if st.button("➡️ Open report"):
-            st.session_state["report_ticker"] = open_tk
-            st.session_state["_report_jump"] = True
-            st.session_state["_pending_nav"] = "Single Stock Report"
-            st.rerun()
-    with a2:
-        rm_tk = st.selectbox("Remove", wl, key="wl_rm")
-        if st.button("➖ Remove from watchlist"):
-            remove_ticker(st.session_state, rm_tk)
-            st.rerun()
+    open_tk = st.selectbox("Open report", wl, key="wl_open")
+    if st.button("➡️ Open report"):
+        st.session_state["report_ticker"] = open_tk
+        st.session_state["_report_jump"] = True
+        st.session_state["_pending_nav"] = "Single Stock Report"
+        st.rerun()
 
-    # Alerts (monitoring rules)
-    st.markdown("**Alerts**")
-    with st.expander("Alert thresholds", expanded=False):
-        a1, a2, a3 = st.columns(3)
-        min_q = a1.number_input(
-            "Min quality",
-            min_value=0.0,
-            max_value=100.0,
-            value=50.0,
-            step=5.0,
-            key="wl_alert_min_q",
-            help="Alert when quality falls below this.",
-        )
-        max_flags = a2.number_input(
-            "Max red flags",
-            min_value=0,
-            max_value=20,
-            value=0,
-            step=1,
-            key="wl_alert_max_flags",
-            help="Alert when flag count exceeds this.",
-        )
-        max_f = a3.number_input(
-            "Weak F-score ≤",
-            min_value=0,
-            max_value=9,
-            value=3,
-            step=1,
-            key="wl_alert_max_f",
-            help="Alert when Piotroski F is at or below this (needs enough tests).",
-        )
-    alerts = evaluate_watchlist_alerts(
-        sub,
-        tickers=wl,
-        rules={
-            "min_quality": float(min_q),
-            "max_red_flags": int(max_flags),
-            "max_f_score_low": int(max_f),
-        },
-    )
-    asum = alert_summary(alerts)
-    st.markdown(
-        badge_row(
-            [
-                (f"{asum['high']} high", "Red" if asum["high"] else "Green"),
-                (f"{asum['medium']} medium", "Yellow" if asum["medium"] else "Green"),
-                (f"{asum['low']} low", "Moderate" if asum["low"] else "Green"),
-                (f"{asum['names']} names", "Moderate"),
-            ]
-        ),
-        unsafe_allow_html=True,
-    )
-    if alerts.empty:
-        st.success("No alerts on the current watchlist with these thresholds.")
-    else:
-        show_a = alerts.copy()
-        show_a["ticker"] = show_a["ticker"].astype(str).str.replace(".NS", "", regex=False)
-        st.dataframe(
-            show_a.rename(
-                columns={
-                    "ticker": "Ticker",
-                    "severity": "Severity",
-                    "code": "Rule",
-                    "message": "Message",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    # Sector mix / concentration
-    if "sector" in sub.columns and sub["sector"].notna().any():
-        st.markdown("**Sector mix & concentration**")
-        mix = (
-            sub.groupby("sector", dropna=False)
-            .agg(Names=("ticker", "nunique"), Avg_quality=("quality_score", "mean"))
-            .reset_index()
-            .sort_values("Names", ascending=False)
-        )
-        mix["Weight_%"] = (mix["Names"] / mix["Names"].sum() * 100).round(1)
-        top_w = float(mix["Weight_%"].iloc[0]) if len(mix) else 0.0
-        if top_w >= 50 and len(mix) > 1:
-            st.warning(
-                f"Concentration: **{mix.iloc[0]['sector']}** is {top_w:.0f}% of the list."
+    with st.expander("Sector & market-cap mix", expanded=False):
+        if "sector" in sub.columns and sub["sector"].notna().any():
+            st.markdown("**Sector mix**")
+            mix = (
+                sub.groupby("sector", dropna=False)
+                .agg(
+                    Names=("ticker", "nunique"),
+                    Avg_quality=("quality_score", "mean"),
+                )
+                .reset_index()
+                .sort_values("Names", ascending=False)
             )
-        st.bar_chart(mix.set_index("sector")["Names"], height=220)
-        st.dataframe(mix, use_container_width=True, hide_index=True)
+            mix["Weight_%"] = (mix["Names"] / mix["Names"].sum() * 100).round(1)
+            top_w = float(mix["Weight_%"].iloc[0]) if len(mix) else 0.0
+            if top_w >= 50 and len(mix) > 1:
+                st.warning(
+                    f"Concentration: **{mix.iloc[0]['sector']}** is "
+                    f"{top_w:.0f}% of the list."
+                )
+            st.bar_chart(mix.set_index("sector")["Names"], height=200)
+            st.dataframe(mix, use_container_width=True, hide_index=True)
+        if "mcap_bucket" in sub.columns and (sub["mcap_bucket"] != "Unknown").any():
+            st.markdown("**Market-cap mix**")
+            cap_mix = (
+                sub.groupby("mcap_bucket", dropna=False)
+                .agg(
+                    Names=("ticker", "nunique"),
+                    Avg_quality=("quality_score", "mean"),
+                )
+                .reset_index()
+            )
+            st.dataframe(cap_mix, use_container_width=True, hide_index=True)
 
-    # Market-cap mix when available
-    if "mcap_bucket" in sub.columns and (sub["mcap_bucket"] != "Unknown").any():
-        st.markdown("**Market-cap mix**")
-        cap_mix = (
-            sub.groupby("mcap_bucket", dropna=False)
-            .agg(Names=("ticker", "nunique"), Avg_quality=("quality_score", "mean"))
-            .reset_index()
-        )
-        st.dataframe(cap_mix, use_container_width=True, hide_index=True)
-
-    # Quality labels strip
     st.caption(
         "Labels: "
         + ", ".join(
@@ -345,3 +376,36 @@ key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
             if pd.notna(r.get("quality_score"))
         )
     )
+
+
+def render_watchlist(data: pd.DataFrame) -> None:
+    section("Watchlist")
+    _render_storage_caption()
+
+    err = st.session_state.get(ERROR_KEY)
+    if err:
+        st.warning(f"Watchlist cloud sync issue (using session cache): {err}")
+
+    wl = get_watchlist(st.session_state)
+    summary = watchlist_summary(data, wl)
+
+    tab_port, tab_manage = st.tabs(["Portfolio", "Manage & alerts"])
+    with tab_port:
+        _render_portfolio(data, wl, summary)
+    with tab_manage:
+        _render_manage(data, wl)
+        st.divider()
+        if wl:
+            sub = filter_universe(data, wl)
+            if not sub.empty:
+                if "date" in sub.columns:
+                    sub = (
+                        sub.sort_values("date")
+                        .groupby("ticker", as_index=False)
+                        .tail(1)
+                    )
+                _render_alerts(sub, wl)
+            else:
+                st.caption("Alerts need names present in the scored universe.")
+        else:
+            st.caption("Add names first to evaluate alerts.")

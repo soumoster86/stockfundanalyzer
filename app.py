@@ -123,49 +123,64 @@ demo_available = os.path.exists(DEMO_PATH) or os.path.exists(
     os.path.join(os.path.dirname(__file__) or ".", DEMO_PATH)
 )
 
-st.sidebar.markdown("### 📂 Data source")
-uploaded = st.sidebar.file_uploader(
-    "Upload a different fundamentals CSV (optional)",
-    type="csv",
-    help="Leave empty to use the project’s fundamentals.csv automatically. "
-         "Upload here to override with a new file (e.g. labeled.csv).",
-)
-
-use_demo = False
-if default_fund_path is None and demo_available and uploaded is None:
-    use_demo = st.sidebar.button(
-        "▶️ Load demo data",
-        help="Explore the app with a bundled sample universe.",
-    )
-elif default_fund_path is not None and uploaded is None:
-    st.sidebar.caption(
-        f"Using project file **`{os.path.basename(default_fund_path)}`** by default. "
-        "Upload above only if you want to replace it for this session."
-    )
-    if demo_available:
-        use_demo = st.sidebar.button(
-            "▶️ Load demo data instead",
-            help="Ignore fundamentals.csv and load the small demo sample.",
+# Collapse data chrome after a successful prior load so research pages stay clean.
+_data_ready = bool(st.session_state.get("_data_loaded"))
+with st.sidebar.expander("📂 Data source", expanded=not _data_ready):
+    if _data_ready and default_fund_path is not None:
+        st.caption(
+            f"Loaded: **`{os.path.basename(default_fund_path)}`** "
+            "(upload below to override)."
         )
+    uploaded = st.file_uploader(
+        "Upload fundamentals CSV (optional)",
+        type="csv",
+        help="Leave empty to use the project’s fundamentals.csv automatically.",
+        key="sidebar_fundamentals_upload",
+    )
 
-st.sidebar.download_button(
-    "⬇️ Sample fundamentals template",
-    data=sample_csv_bytes(),
-    file_name="stock_analyzer_template.csv",
-    mime="text/csv",
-    help="Pre-filled example with 2 tickers × 2 years.",
-)
+    use_demo = False  # set by demo buttons below when shown
+    if default_fund_path is None and demo_available and uploaded is None:
+        use_demo = st.button(
+            "▶️ Load demo data",
+            help="Explore the app with a bundled sample universe.",
+            key="sidebar_load_demo",
+        )
+    elif default_fund_path is not None and uploaded is None:
+        if not _data_ready:
+            st.caption(
+                f"Using project file **`{os.path.basename(default_fund_path)}`** "
+                "by default."
+            )
+        if demo_available:
+            use_demo = st.button(
+                "▶️ Load demo data instead",
+                help="Ignore fundamentals.csv and load the small demo sample.",
+                key="sidebar_load_demo_alt",
+            )
 
-with st.sidebar.expander("🇮🇳 India governance CSV (optional)"):
+    st.download_button(
+        "⬇️ Sample fundamentals template",
+        data=sample_csv_bytes(),
+        file_name="stock_analyzer_template.csv",
+        mime="text/csv",
+        help="Pre-filled example with 2 tickers × 2 years.",
+    )
     st.caption(
-        "Yahoo does not provide promoter pledge, insider trades, auditor, or "
-        "related-party flags. Upload a governance overlay so those red flags can fire."
+        "CSV needs `ticker`, `date`, metric columns. Growth = decimals (0.12); "
+        "ROE/margins = percent points."
+    )
+
+    st.markdown("**India governance (optional)**")
+    st.caption(
+        "Yahoo lacks pledge / insider / auditor / related-party. Upload an overlay "
+        "so those red flags can fire."
     )
     st.download_button(
         "⬇️ Governance template",
         data=governance_template_csv(),
         file_name="governance_template.csv",
         mime="text/csv",
+        key="gov_template_dl",
     )
     gov_file = st.file_uploader(
         "Upload governance CSV",
@@ -173,70 +188,61 @@ with st.sidebar.expander("🇮🇳 India governance CSV (optional)"):
         key="gov_upload",
     )
 
-st.sidebar.markdown(
-    "CSV needs `ticker`, `date`, metric columns. Growth fields are **decimals** "
-    "(0.12 = 12%); ROE/margins are **percent points** (12 = 12%). "
-    "For ML labels run `python -m src.build_labels`."
-)
+    # Local Yahoo refresh (optional — needs yfinance + network)
+    from src.refresh import refresh_fundamentals, yfinance_available
 
-# Local Yahoo refresh (optional — needs yfinance + network)
-from src.refresh import refresh_fundamentals, yfinance_available
+    st.markdown("**Refresh from Yahoo**")
+    if yfinance_available():
+        _max_refresh = st.number_input(
+            "Max tickers to refresh",
+            min_value=1,
+            max_value=5000,
+            value=100,
+            step=50,
+            help="Prefer offline `python -m src.fetch_fundamentals` for large lists.",
+            key="refresh_max_tickers",
+        )
+        if st.button(
+            "Refresh fundamentals (Yahoo)",
+            use_container_width=True,
+            help="Re-fetch from Yahoo into fundamentals.csv (local only).",
+            key="refresh_yahoo_btn",
+        ):
+            root = os.path.dirname(os.path.abspath(__file__))
+            prog = st.progress(0.0, text="Starting…")
+            status = st.empty()
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔄 Refresh data")
-if yfinance_available():
-    _max_refresh = st.sidebar.number_input(
-        "Max tickers to refresh",
-        min_value=1,
-        max_value=5000,
-        value=100,
-        step=50,
-        help="Full universe refreshes can take a long time. Prefer stocks.csv offline "
-             "via `python -m src.fetch_fundamentals` for thousands of names.",
-        key="refresh_max_tickers",
-    )
-    if st.sidebar.button(
-        "Refresh fundamentals (Yahoo)",
-        use_container_width=True,
-        help="Re-fetch from Yahoo into fundamentals.csv (local only).",
-    ):
-        root = os.path.dirname(os.path.abspath(__file__))
-        prog = st.sidebar.progress(0.0, text="Starting…")
-        status = st.sidebar.empty()
+            def _cb(i, total, tkr):
+                prog.progress(min(1.0, i / max(total, 1)), text=f"{i}/{total} {tkr}")
+                status.caption(f"Fetching {tkr}…")
 
-        def _cb(i, total, tkr):
-            prog.progress(min(1.0, i / max(total, 1)), text=f"{i}/{total} {tkr}")
-            status.caption(f"Fetching {tkr}…")
-
-        with st.spinner("Refreshing fundamentals from Yahoo…"):
-            # Uses stocks.csv when present; otherwise pass None (refresh will error
-            # clearly if neither stocks.csv nor tickers exist).
-            result = refresh_fundamentals(
-                root,
-                out_name="fundamentals.csv",
-                tickers=None,
-                sleep_s=0.35,
-                max_tickers=int(_max_refresh),
-                progress_cb=_cb,
-            )
-        prog.empty()
-        status.empty()
-        if result["ok"]:
-            st.sidebar.success(result["message"])
-            st.cache_data.clear()
-            st.rerun()
-        else:
-            st.sidebar.error(result["message"])
-else:
-    st.sidebar.caption(
-        "Install `yfinance` locally to enable one-click refresh, or run:\n"
-        "`python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv`"
-    )
+            with st.spinner("Refreshing fundamentals from Yahoo…"):
+                result = refresh_fundamentals(
+                    root,
+                    out_name="fundamentals.csv",
+                    tickers=None,
+                    sleep_s=0.35,
+                    max_tickers=int(_max_refresh),
+                    progress_cb=_cb,
+                )
+            prog.empty()
+            status.empty()
+            if result["ok"]:
+                st.success(result["message"])
+                st.cache_data.clear()
+                st.session_state["_data_loaded"] = True
+                st.rerun()
+            else:
+                st.error(result["message"])
+    else:
+        st.caption(
+            "Install `yfinance` for one-click refresh, or run "
+            "`python -m src.fetch_fundamentals`."
+        )
 
 if st.sidebar.button("📖 Open Tutorial", use_container_width=True):
     st.session_state["_pending_nav"] = "Tutorial"
     st.rerun()
-
 # Resolve which source to load (upload > demo button > project fundamentals > empty)
 data_source_label = None
 data_source_path = None
@@ -383,6 +389,9 @@ if is_tickers_only(raw):
     st.info(f"Detected {raw['ticker'].nunique()} unique tickers in your upload.")
     st.stop()
 
+# Mark data loaded so next run collapses the data expander
+st.session_state["_data_loaded"] = True
+
 has_sector = "sector" in raw.columns and raw["sector"].notna().any()
 use_sector = False
 if has_sector:
@@ -394,10 +403,10 @@ if has_sector:
     )
 else:
     st.sidebar.caption(
-        "ℹ️ No `sector` column — ranking vs full universe. Re-run the fetcher to add sectors."
+        "No `sector` column — ranking vs full universe."
     )
 
-# ---- Configurable category weights ----
+# ---- Configurable category weights (sliders collapsed unless Custom) ----
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚖️ Scoring weights")
 preset = st.sidebar.selectbox(
@@ -450,21 +459,27 @@ else:
     base_weights = dict(DEFAULT_CATEGORY_WEIGHTS)
 
 weights = {}
-for cat in DEFAULT_CATEGORY_WEIGHTS:
-    weights[cat] = st.sidebar.slider(
-        cat,
-        0.0,
-        1.0,
-        float(base_weights.get(cat, DEFAULT_CATEGORY_WEIGHTS[cat])),
-        0.05,
-        disabled=(preset != "Custom"),
-        key=f"w_{cat}",
-        help=CATEGORY_TOOLTIPS.get(cat),
-    )
+with st.sidebar.expander(
+    "Category sliders",
+    expanded=(preset == "Custom"),
+):
+    if preset != "Custom":
+        st.caption("Switch preset to **Custom** to edit sliders.")
+    for cat in DEFAULT_CATEGORY_WEIGHTS:
+        weights[cat] = st.slider(
+            cat,
+            0.0,
+            1.0,
+            float(base_weights.get(cat, DEFAULT_CATEGORY_WEIGHTS[cat])),
+            0.05,
+            disabled=(preset != "Custom"),
+            key=f"w_{cat}",
+            help=CATEGORY_TOOLTIPS.get(cat),
+        )
 total_w = sum(weights.values())
 if total_w > 0:
     st.sidebar.caption(
-        "Effective mix: "
+        "Mix: "
         + ", ".join(
             f"{cat.split()[0]} {weights[cat] / total_w * 100:.0f}%" for cat in weights
         )

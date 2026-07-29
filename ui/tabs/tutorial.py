@@ -118,9 +118,11 @@ Navigation is **two levels**:
 | **Tools** | Train Model · Tutorial |
 
 **Report** uses sub-tabs: Overview · Forensics · Drivers · Context.  
-**Ranking** keeps the table up front; open **Screen & filters** for thresholds and funnel.
+**Ranking** keeps the table up front; open **Screen & filters** for thresholds and funnel.  
+**Watchlist** uses **Portfolio** vs **Manage & alerts**.
 
-**Sidebar:** data source, scoring weight presets, sector peer ranking toggle, logout.
+**Sidebar:** data source collapses after first load; weight presets + optional category
+sliders; sector peer ranking toggle; logout.
             """
         )
 

@@ -1,4 +1,4 @@
-"""Train Model tab."""
+"""Train Model tab — primary actions first; docs collapsed."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from src.model import (
     predict_proba,
     train_outperformance_model,
 )
+from ui.theme import section
 
 MODEL_PATH = os.path.join(tempfile.gettempdir(), "outperformance_model.joblib")
 
@@ -39,16 +40,7 @@ def _load_bundle():
 
 
 def render_train(data: pd.DataFrame) -> None:
-    st.subheader("Train Global Outperformance Model")
-    st.info(
-        "⚠️ Needs `fwd_return` + `bench_fwd_return` (realized forward returns). "
-        "Build them offline with:\n\n"
-        "```bash\npip install yfinance\n"
-        "python -m src.build_labels --in fundamentals.csv --out labeled.csv "
-        "--horizon-years 3 --benchmark ^NSEI\n```\n"
-        "Then re-upload `labeled.csv`. Models are session-scoped on Cloud but "
-        "you can **download / upload** a joblib bundle to reuse them."
-    )
+    section("Train global outperformance model")
 
     has_labels = {"fwd_return", "bench_fwd_return"}.issubset(data.columns)
     if has_labels:
@@ -60,7 +52,26 @@ def render_train(data: pd.DataFrame) -> None:
             f"(training uses the full multi-year panel when available)."
         )
     else:
-        st.warning("Current data has no label columns. Run `src.build_labels` and re-upload.")
+        st.warning(
+            "Current data has no label columns. "
+            "Build labels offline (see **How to prepare labels** below)."
+        )
+
+    with st.expander("How to prepare labels", expanded=not has_labels):
+        st.markdown(
+            """
+Needs `fwd_return` + `bench_fwd_return` (realized forward returns).
+
+```bash
+pip install yfinance
+python -m src.build_labels --in fundamentals.csv --out labeled.csv \\
+  --horizon-years 3 --benchmark ^NSEI
+```
+
+Then re-upload `labeled.csv`. Models are **session-scoped** on Cloud but you can
+**download / upload** a joblib bundle to reuse them.
+            """
+        )
 
     algo_opts = ["randomforest"]
     if HAS_LGBM:
@@ -79,19 +90,17 @@ def render_train(data: pd.DataFrame) -> None:
         include_quality = st.checkbox(
             "Include quality_score as feature",
             value=False,
-            help="Off by default — quality is a blend of the other fundamentals "
-                 "and can dominate feature importance without adding new information.",
+            help="Off by default — quality is a blend of the other fundamentals.",
         )
     calibrate = st.checkbox(
         "Calibrate probabilities (isotonic)",
         value=False,
-        help="Uses cross-validated calibration so predicted probabilities are better "
-             "aligned with observed frequencies. Needs enough labeled rows.",
+        help="Better-aligned probabilities; needs enough labeled rows.",
     )
 
     if not (HAS_LGBM or HAS_XGB):
         st.caption(
-            "ℹ️ Using scikit-learn RandomForest. Optional boosters: "
+            "Using scikit-learn RandomForest. Optional boosters: "
             "`pip install -r requirements-ml.txt`."
         )
 
@@ -103,7 +112,6 @@ def render_train(data: pd.DataFrame) -> None:
         if not has_labels:
             st.error("Training needs `fwd_return` and `bench_fwd_return` columns.")
         else:
-            # Prefer full multi-year if available in session
             train_src = st.session_state.get("raw_panel", data)
             train_df = make_label(train_src)
             feats = [c for c in feats_base if c in train_df.columns]
@@ -141,53 +149,57 @@ def render_train(data: pd.DataFrame) -> None:
                             f"n={r['n']}, base rate={r['base_rate']:.2f})"
                         )
                 if "feature_importance" in report:
-                    st.bar_chart(report["feature_importance"].head(15))
+                    with st.expander("Feature importance", expanded=True):
+                        st.bar_chart(report["feature_importance"].head(15))
 
-    st.markdown("---")
-    st.markdown("**Model bundle (download / upload)**")
+    st.markdown("**Model bundle**")
     bundle = _load_bundle()
     if bundle is not None:
         buf = io.BytesIO()
         joblib.dump(bundle, buf)
-        st.download_button(
-            "⬇️ Download trained model (.joblib)",
-            data=buf.getvalue(),
-            file_name="outperformance_model.joblib",
-            mime="application/octet-stream",
-        )
-        if st.button("Score universe with saved model"):
-            feats = bundle.get("features") or [
-                c for c in RAW_FEATURE_COLS if c in data.columns
-            ]
-            try:
-                probs = predict_proba(bundle["model"], data, feats)
-            except Exception as e:
-                st.error(f"Scoring failed: {e}")
-            else:
-                data["outperform_proba"] = probs
-                st.session_state["outperform_by_ticker"] = dict(
-                    zip(data["ticker"], probs)
-                )
-                st.success(
-                    "Universe scored. Open **Universe Ranking** — scores persist "
-                    "for this session."
-                )
+        b1, b2 = st.columns(2)
+        with b1:
+            st.download_button(
+                "⬇️ Download model (.joblib)",
+                data=buf.getvalue(),
+                file_name="outperformance_model.joblib",
+                mime="application/octet-stream",
+            )
+        with b2:
+            if st.button("Score universe with saved model"):
+                feats = bundle.get("features") or [
+                    c for c in RAW_FEATURE_COLS if c in data.columns
+                ]
+                try:
+                    probs = predict_proba(bundle["model"], data, feats)
+                except Exception as e:
+                    st.error(f"Scoring failed: {e}")
+                else:
+                    data["outperform_proba"] = probs
+                    st.session_state["outperform_by_ticker"] = dict(
+                        zip(data["ticker"], probs)
+                    )
+                    st.success(
+                        "Universe scored. Open **Research → Universe Ranking** — "
+                        "scores persist for this session."
+                    )
 
-    uploaded_model = st.file_uploader(
-        "Upload a previously trained model (.joblib)",
-        type=["joblib", "pkl"],
-        key="model_upload",
-    )
-    if uploaded_model is not None and st.button("Load uploaded model"):
-        try:
-            bundle = joblib.load(uploaded_model)
-            if "model" not in bundle or "features" not in bundle:
-                st.error("Invalid bundle — expected keys `model` and `features`.")
-            else:
-                _save_bundle(bundle)
-                st.success(
-                    f"Loaded model with {len(bundle['features'])} features. "
-                    "Click **Score universe** above."
-                )
-        except Exception as e:
-            st.error(f"Could not load model: {e}")
+    with st.expander("Upload a previously trained model", expanded=False):
+        uploaded_model = st.file_uploader(
+            "Model file (.joblib / .pkl)",
+            type=["joblib", "pkl"],
+            key="model_upload",
+        )
+        if uploaded_model is not None and st.button("Load uploaded model"):
+            try:
+                bundle = joblib.load(uploaded_model)
+                if "model" not in bundle or "features" not in bundle:
+                    st.error("Invalid bundle — expected keys `model` and `features`.")
+                else:
+                    _save_bundle(bundle)
+                    st.success(
+                        f"Loaded model with {len(bundle['features'])} features. "
+                        "Click **Score universe** above."
+                    )
+            except Exception as e:
+                st.error(f"Could not load model: {e}")
