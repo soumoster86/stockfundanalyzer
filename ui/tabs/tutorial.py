@@ -178,7 +178,9 @@ Save custom combos under **Save / delete custom screen**.
 **Watchlist**
 - Add from Report (☆) or Ranking (**Add to watchlist**).  
 - See avg quality, flags, sector mix.  
-- Import/export CSV (`ticker` column) to keep the list across sessions.  
+- Default storage is this browser session; enable Supabase secrets for a durable
+  per-user list (see Watchlist page expander / README).  
+- Import/export CSV (`ticker` column) as backup or migration.  
 - Open or remove names from this page.
 
 **Compare**

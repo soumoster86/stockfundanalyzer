@@ -1,9 +1,13 @@
 """
 Watchlist persistence
 ---------------------
-Session-scoped list of tickers the user cares about, with optional CSV
-import/export. Cloud deploys are ephemeral; download the CSV to keep a
-watchlist across sessions.
+Public API used by Report / Ranking / Watchlist UI.
+
+Backends:
+  * Supabase (when [supabase] url+key secrets / env are set) — durable per user
+  * Streamlit session_state — always used as cache; sole backend if Supabase off
+
+CSV import/export remains for backup and migration.
 """
 
 from __future__ import annotations
@@ -14,14 +18,75 @@ from typing import Iterable
 import pandas as pd
 
 SESSION_KEY = "watchlist_tickers"
+HYDRATED_KEY = "_watchlist_hydrated"
+BACKEND_KEY = "_watchlist_backend"  # "supabase" | "session"
+ERROR_KEY = "_watchlist_backend_error"
+USERNAME_KEY = "auth_user"
 
 
 def normalize_ticker(t: str) -> str:
     return str(t).strip()
 
 
+def _username(session_state) -> str:
+    u = session_state.get(USERNAME_KEY) if session_state is not None else None
+    u = (u or "anonymous").strip() or "anonymous"
+    return u
+
+
+def _use_supabase() -> bool:
+    try:
+        from src.watchlist_supabase import is_configured
+        return is_configured()
+    except Exception:
+        return False
+
+
+def backend_name(session_state=None) -> str:
+    """Active backend label for UI."""
+    if session_state is not None and session_state.get(BACKEND_KEY):
+        return str(session_state[BACKEND_KEY])
+    return "supabase" if _use_supabase() else "session"
+
+
+def ensure_hydrated(session_state) -> None:
+    """
+    Load watchlist from Supabase once per session when configured.
+    Safe no-op for session-only mode.
+    """
+    if session_state is None:
+        return
+    if session_state.get(HYDRATED_KEY):
+        return
+
+    session_state[ERROR_KEY] = None
+    if not _use_supabase():
+        session_state[BACKEND_KEY] = "session"
+        session_state[HYDRATED_KEY] = True
+        # leave any existing session list as-is
+        if SESSION_KEY not in session_state:
+            session_state[SESSION_KEY] = []
+        return
+
+    try:
+        from src import watchlist_supabase as sb
+
+        user = _username(session_state)
+        tickers = sb.fetch_tickers(user)
+        session_state[SESSION_KEY] = list(tickers)
+        session_state[BACKEND_KEY] = "supabase"
+    except Exception as e:
+        # Fall back to session so the app keeps working
+        session_state[BACKEND_KEY] = "session"
+        session_state[ERROR_KEY] = str(e)
+        if SESSION_KEY not in session_state:
+            session_state[SESSION_KEY] = []
+    session_state[HYDRATED_KEY] = True
+
+
 def get_watchlist(session_state) -> list[str]:
-    raw = session_state.get(SESSION_KEY, [])
+    ensure_hydrated(session_state)
+    raw = session_state.get(SESSION_KEY, []) if session_state is not None else []
     out = []
     seen = set()
     for t in raw:
@@ -33,6 +98,7 @@ def get_watchlist(session_state) -> list[str]:
 
 
 def set_watchlist(session_state, tickers: Iterable[str]) -> list[str]:
+    ensure_hydrated(session_state)
     cleaned = []
     seen = set()
     for t in tickers:
@@ -41,26 +107,59 @@ def set_watchlist(session_state, tickers: Iterable[str]) -> list[str]:
             seen.add(nt)
             cleaned.append(nt)
     session_state[SESSION_KEY] = cleaned
+
+    if _use_supabase():
+        try:
+            from src import watchlist_supabase as sb
+
+            sb.replace_all(_username(session_state), cleaned)
+            session_state[BACKEND_KEY] = "supabase"
+            session_state[ERROR_KEY] = None
+        except Exception as e:
+            session_state[ERROR_KEY] = str(e)
+            # keep session list even if sync fails
     return cleaned
 
 
 def add_ticker(session_state, ticker: str) -> bool:
     """Add one ticker. Returns True if newly added."""
+    ensure_hydrated(session_state)
     wl = get_watchlist(session_state)
     nt = normalize_ticker(ticker)
     if not nt or nt in wl:
         return False
     wl.append(nt)
     session_state[SESSION_KEY] = wl
+
+    if _use_supabase():
+        try:
+            from src import watchlist_supabase as sb
+
+            sb.insert_ticker(_username(session_state), nt)
+            session_state[BACKEND_KEY] = "supabase"
+            session_state[ERROR_KEY] = None
+        except Exception as e:
+            session_state[ERROR_KEY] = str(e)
     return True
 
 
 def remove_ticker(session_state, ticker: str) -> bool:
+    ensure_hydrated(session_state)
     wl = get_watchlist(session_state)
     nt = normalize_ticker(ticker)
     if nt not in wl:
         return False
     session_state[SESSION_KEY] = [t for t in wl if t != nt]
+
+    if _use_supabase():
+        try:
+            from src import watchlist_supabase as sb
+
+            sb.delete_ticker(_username(session_state), nt)
+            session_state[BACKEND_KEY] = "supabase"
+            session_state[ERROR_KEY] = None
+        except Exception as e:
+            session_state[ERROR_KEY] = str(e)
     return True
 
 
@@ -82,7 +181,6 @@ def watchlist_from_csv(source) -> list[str]:
         df = pd.read_csv(source)
     df.columns = [str(c).strip().lower() for c in df.columns]
     if "ticker" not in df.columns:
-        # allow single-column nameless or first column
         if len(df.columns) == 1:
             col = df.columns[0]
         else:

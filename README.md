@@ -171,6 +171,9 @@ Notes:
 - Model training on the cloud is **ephemeral** — scores are kept in session state
   for the browser session and are not persisted across redeploys (and aren't
   meaningful until forward-return labels exist anyway).
+- **Watchlists** can stay session-only, or use Supabase (add `supabase` to
+  Cloud packages / `requirements.txt` and set `[supabase]` secrets — see
+  *Durable watchlists* above).
 - Public Community Cloud apps are visible to anyone with the link; don't commit
   anything sensitive.
 
@@ -212,12 +215,43 @@ governance CSV from the sidebar (template download provided). Columns:
 
 ## Watchlist, screens & peers
 
-- **Watchlist** page — session list with CSV import/export, quality snapshot,
-  sector mix, open/remove actions.
+- **Watchlist** page — quality snapshot, sector mix, open/remove, CSV
+  import/export. Storage is **session-only by default**; enable Supabase for a
+  durable per-user list (see below).
 - **Screens** on Universe Ranking — built-in presets (Clean quality, Value
   quality, Low leverage, Watchlist only) plus save-your-own filter bundles.
 - **Sector peers** on the Single Stock Report — top quality names in the same
   sector with one-click open.
+
+### Durable watchlists (optional Supabase)
+
+Without extra config the list lives in Streamlit `session_state` (lost on
+refresh). To persist per logged-in user:
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In the SQL editor, run `sql/watchlist_supabase.sql` (creates
+   `public.watchlist_items`).
+3. Add secrets (local `.streamlit/secrets.toml` or Streamlit Cloud → Secrets):
+   ```toml
+   [supabase]
+   url = "https://YOUR_PROJECT.supabase.co"
+   key = "YOUR_SERVICE_ROLE_KEY"
+   ```
+   Prefer the **service_role** key only on a trusted Streamlit server (it
+   bypasses RLS). Never commit real keys.
+4. Install the client (Cloud: add to `requirements.txt` or install optional
+   extras locally):
+   ```bash
+   pip install -r requirements-supabase.txt
+   # or: pip install supabase
+   ```
+5. Restart and sign in — the Watchlist page caption shows **Storage: Supabase**.
+   Add/remove from Report, Ranking, or Watchlist write through to Postgres.
+   On login the list is re-hydrated for that username.
+
+Env fallbacks: `SUPABASE_URL`, `SUPABASE_KEY` (or `SUPABASE_SERVICE_KEY`).
+If Supabase is misconfigured or unreachable, the app falls back to the session
+cache and shows a warning on the Watchlist page.
 
 ## CI & monthly re-score
 
@@ -241,8 +275,9 @@ app.py                 # Streamlit shell
 ui/tabs/               # report, ranking, watchlist, compare, sector, train
 src/
   enrich.py, schema.py, governance.py, build_labels.py
-  watchlist.py, screens.py, peers.py
+  watchlist.py, watchlist_supabase.py, screens.py, peers.py
   institutional_scores.py, flag_lists.py, ...
+sql/watchlist_supabase.sql   # Supabase table DDL
 scripts/rescore.py     # Offline / CI batch score
 .github/workflows/     # CI + monthly re-score
 tests/
@@ -250,6 +285,7 @@ demo_data.csv
 requirements.txt       # Pinned Cloud runtime
 requirements-dev.txt   # + pytest, ruff
 requirements-ml.txt    # Optional LightGBM / XGBoost
+requirements-supabase.txt  # Optional durable watchlists
 _archive/              # Old price-predictor stack (unused)
 ```
 

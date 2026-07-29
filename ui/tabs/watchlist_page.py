@@ -7,7 +7,9 @@ import streamlit as st
 
 from src.quality_score import CONCEPT_TOOLTIPS, score_label
 from src.watchlist import (
+    ERROR_KEY,
     add_ticker,
+    backend_name,
     filter_universe,
     get_watchlist,
     remove_ticker,
@@ -16,15 +18,49 @@ from src.watchlist import (
     watchlist_summary,
     watchlist_to_csv,
 )
+from src.watchlist_supabase import backend_status
 from ui.theme import badge_row, band_text, section
 
 
 def render_watchlist(data: pd.DataFrame) -> None:
     section("Watchlist")
-    st.caption(
-        "Focus on names you care about. Session-scoped — download a CSV to keep it "
-        "across restarts. Z/M: 🟢 good · 🟡 watch · 🔴 risk."
-    )
+    backend = backend_name(st.session_state)
+    if backend == "supabase":
+        st.caption(
+            "Storage: **Supabase** (per user, survives restarts). "
+            "Z/M: 🟢 good · 🟡 watch · 🔴 risk."
+        )
+    else:
+        st.caption(
+            "Storage: **this browser session** (ephemeral). "
+            "Configure Supabase secrets for a durable per-user list, "
+            "or download CSV as backup. Z/M: 🟢 good · 🟡 watch · 🔴 risk."
+        )
+        status = backend_status()
+        if not status["configured"]:
+            with st.expander("How to enable Supabase watchlists", expanded=False):
+                st.markdown(
+                    """
+1. Create a free project at [supabase.com](https://supabase.com).  
+2. Run the SQL in `sql/watchlist_supabase.sql` in the SQL editor.  
+3. Add to `.streamlit/secrets.toml` (or Streamlit Cloud secrets):
+
+```toml
+[supabase]
+url = "https://YOUR_PROJECT.supabase.co"
+key = "YOUR_SERVICE_ROLE_OR_ANON_KEY"
+```
+
+4. Install: `pip install supabase`  
+5. Restart the app and sign in — your list loads from Supabase.
+                    """
+                )
+        elif not status["package_installed"]:
+            st.warning("Supabase secrets found but package missing: `pip install supabase`")
+
+    err = st.session_state.get(ERROR_KEY)
+    if err:
+        st.warning(f"Watchlist cloud sync issue (using session cache): {err}")
 
     wl = get_watchlist(st.session_state)
     summary = watchlist_summary(data, wl)

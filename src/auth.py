@@ -161,6 +161,15 @@ def login_gate():
             if check_credentials(username.strip(), password, users):
                 st.session_state["auth_user"] = username.strip()
                 st.session_state["auth_attempts"] = 0
+                # Force re-hydrate watchlist for this user from Supabase (if configured)
+                st.session_state.pop("_watchlist_hydrated", None)
+                st.session_state.pop("watchlist_tickers", None)
+                try:
+                    from src.watchlist import ensure_hydrated
+
+                    ensure_hydrated(st.session_state)
+                except Exception:
+                    pass
                 st.rerun()
             else:
                 st.session_state["auth_attempts"] = attempts + 1
@@ -198,6 +207,11 @@ def logout_button():
             st.caption(f"Signed in as **{st.session_state['auth_user']}**")
             if st.button("Log out"):
                 st.session_state.pop("auth_user", None)
+                # Drop hydrated watchlist so the next login reloads for that user
+                st.session_state.pop("watchlist_tickers", None)
+                st.session_state.pop("_watchlist_hydrated", None)
+                st.session_state.pop("_watchlist_backend", None)
+                st.session_state.pop("_watchlist_backend_error", None)
                 st.rerun()
 
 

@@ -52,7 +52,7 @@ FEATURE_GROUPS = [
             ("🎯", "Screen presets",
              "Clean quality, value quality, low leverage, watchlist — plus save your own."),
             ("⭐", "Watchlist",
-             "Session watchlist with portfolio snapshot, sector mix, CSV import/export."),
+             "Per-user list (session or optional Supabase), snapshot, sector mix, CSV."),
             ("🔀", "Compare",
              "2–5 stocks side by side with radars, badges, and metrics table."),
             ("🏭", "Sector overview",

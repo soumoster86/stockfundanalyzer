@@ -1,0 +1,4 @@
+# Optional: durable watchlists via Supabase
+#   pip install -r requirements-supabase.txt
+-r requirements.txt
+supabase>=2.0,<3
