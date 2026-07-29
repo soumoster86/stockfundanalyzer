@@ -9,6 +9,15 @@ from src.watchlist import (
     ensure_hydrated,
     backend_name,
 )
+from src.watchlist_supabase import normalize_supabase_url
+
+
+def test_normalize_supabase_url():
+    assert normalize_supabase_url("https://abc.supabase.co") == "https://abc.supabase.co"
+    assert normalize_supabase_url("https://abc.supabase.co/") == "https://abc.supabase.co"
+    assert normalize_supabase_url("https://abc.supabase.co/rest/v1") == "https://abc.supabase.co"
+    assert normalize_supabase_url("https://abc.supabase.co/rest/v1/") == "https://abc.supabase.co"
+    assert normalize_supabase_url('  "https://abc.supabase.co/"  ') == "https://abc.supabase.co"
 
 
 class _SS(dict):
