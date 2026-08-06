@@ -124,14 +124,21 @@ jobs:
           import pandas as pd
           p = Path("fundamentals.csv")
           df = pd.read_csv(p) if p.exists() else None
+          max_t = "${{ steps.opts.outputs.max_tickers }}"
           meta = {
               "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "source": "github-actions daily-fundamentals",
               "n_rows": int(len(df)) if df is not None else 0,
               "n_tickers": int(df["ticker"].nunique()) if df is not None and "ticker" in df.columns else 0,
               "workflow_run": "${{ github.run_id }}",
+              "workflow_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
               "ref": "${{ github.ref_name }}",
+              "repository": "${{ github.repository }}",
+              "max_tickers": int(max_t) if max_t.isdigit() else max_t,
+              "use_sector": "${{ steps.opts.outputs.use_sector }}",
           }
+          # Committed next to fundamentals.csv so Streamlit Cloud can show provenance
+          Path("fundamentals_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
           Path("artifacts").mkdir(exist_ok=True)
           Path("artifacts/fetch_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
           print(json.dumps(meta, indent=2))
@@ -151,19 +158,20 @@ jobs:
           name: daily-fundamentals-${{ github.run_id }}
           path: |
             fundamentals.csv
+            fundamentals_meta.json
             artifacts/
           retention-days: 30
 
-      - name: Commit fundamentals.csv (for Streamlit Cloud)
+      - name: Commit fundamentals.csv + meta (for Streamlit Cloud)
         if: steps.opts.outputs.commit_csv == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # data/ and artifacts/ are gitignored — only the fundamentals panel is committed
-          # so Streamlit Cloud redeploys with a fresher universe to re-score on load.
-          git add fundamentals.csv
+          # data/ and artifacts/ are gitignored — commit panel + provenance meta
+          # so Streamlit Cloud redeploys and can show "from GitHub daily run".
+          git add fundamentals.csv fundamentals_meta.json
           if git diff --staged --quiet; then
-            echo "No changes to commit (fundamentals.csv unchanged)."
+            echo "No changes to commit (fundamentals unchanged)."
           else
             git commit -m "chore: daily fundamentals refresh (${{ github.run_id }})"
             git push origin HEAD:${{ github.ref_name }}

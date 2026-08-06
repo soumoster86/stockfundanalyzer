@@ -316,7 +316,14 @@ for w in validation.warnings:
 for note in validation.info:
     st.caption(f"ℹ️ {note}")
 
-# Data freshness banner (file mtime + fiscal date range in the panel)
+# Data freshness / provenance (GitHub daily pipeline vs upload/demo)
+from src.data_freshness import (
+    format_freshness_detail,
+    format_freshness_line,
+    is_github_daily,
+    load_fundamentals_meta,
+)
+
 _date_min = _date_max = None
 if "date" in raw.columns and raw["date"].notna().any():
     _date_min = pd.to_datetime(raw["date"], errors="coerce").min()
@@ -337,16 +344,66 @@ if _date_min is not None and pd.notna(_date_min):
     else:
         _fiscal_txt = _date_min.strftime("%Y-%m-%d")
 
-st.info(
-    f"**Data source:** {data_source_label}"
-    + (f" · **File updated:** {_mtime_txt}" if _mtime_txt else "")
-    + f" · **Fiscal dates:** {_fiscal_txt}"
-    + (
-        " · Upload a CSV in the sidebar to override for this session."
-        if uploaded is None and default_fund_path is not None
-        else ""
+_fund_meta = load_fundamentals_meta(os.path.dirname(os.path.abspath(__file__)) or ".")
+# Only claim GitHub daily provenance when loading the project fundamentals file
+_using_project_fundamentals = (
+    uploaded is None
+    and not use_demo
+    and data_source_path is not None
+    and os.path.basename(str(data_source_path)).lower() in (
+        "fundamentals.csv",
+        "labeled.csv",
     )
 )
+_ci_active = _using_project_fundamentals and is_github_daily(_fund_meta)
+
+if _ci_active:
+    st.success(format_freshness_line(_fund_meta))
+    _run_url = (_fund_meta or {}).get("workflow_url")
+    if _run_url:
+        st.caption(f"[Open this GitHub Actions run]({_run_url})")
+elif uploaded is not None:
+    st.info(
+        f"**Data source:** {data_source_label} · **session upload** "
+        "(not the GitHub daily pipeline for this session)"
+        + f" · **Fiscal dates:** {_fiscal_txt}"
+    )
+elif use_demo:
+    st.info(
+        f"**Data source:** {data_source_label} · demo sample · "
+        f"**Fiscal dates:** {_fiscal_txt}"
+    )
+else:
+    # Project file present but no CI meta yet (or meta from non-CI)
+    st.info(
+        f"**Data source:** {data_source_label}"
+        + (f" · **File updated:** {_mtime_txt}" if _mtime_txt else "")
+        + f" · **Fiscal dates:** {_fiscal_txt}"
+        + (
+            " · Upload a CSV in the sidebar to override for this session."
+            if uploaded is None and default_fund_path is not None
+            else ""
+        )
+    )
+    if _using_project_fundamentals and not is_github_daily(_fund_meta):
+        st.caption(
+            "No GitHub daily-pipeline stamp yet. After **Actions → Daily fundamentals "
+            "+ rankings** commits `fundamentals_meta.json`, this banner will show the "
+            "pipeline run time and id."
+        )
+
+with st.expander("Data provenance details", expanded=False):
+    if _ci_active:
+        for line in format_freshness_detail(_fund_meta):
+            st.markdown(f"- {line}")
+    else:
+        for line in format_freshness_detail(
+            _fund_meta if _using_project_fundamentals else None
+        ):
+            st.markdown(f"- {line}")
+    st.caption(
+        f"Session source label: `{data_source_label}` · fiscal range: {_fiscal_txt}"
+    )
 
 # Optional governance overlay (before scoring so red flags see the fields)
 if gov_file is not None:

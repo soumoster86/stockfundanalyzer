@@ -280,8 +280,10 @@ GitHub Actions:
 4. On success:
    - Artifact `daily-fundamentals-<run_id>` contains `fundamentals.csv` +
      `artifacts/rankings_latest.csv`
-   - If `commit_csv=true` (default), `fundamentals.csv` is pushed to the branch
-     → Streamlit Cloud rebuilds and Ranking uses the new panel.
+   - If `commit_csv=true` (default), `fundamentals.csv` **and**
+     `fundamentals_meta.json` are pushed → Streamlit Cloud rebuilds
+   - The app shows a green banner: **GitHub daily pipeline** with fetch time,
+     ticker count, and a link to the Actions run
 
 **Caveats**
 
