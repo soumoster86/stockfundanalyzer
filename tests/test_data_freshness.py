@@ -53,4 +53,6 @@ def test_meta_from_pipeline_row():
     )
     assert m["from_supabase"] is True
     assert is_github_daily(m)
-    assert "2367" in format_freshness_line(m)
+    line = format_freshness_line(m)
+    assert "2,367" in line or "2367" in line
+    assert "31115210975" in line
