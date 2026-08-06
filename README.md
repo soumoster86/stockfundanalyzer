@@ -293,7 +293,7 @@ GitHub Actions:
 | Reliability | Yahoo rate-limits / blanks are normal; some tickers stay sparse. |
 | Git size | Daily commits of a multi‑MB CSV grow history; prune or LFS later if needed. |
 | Cloud | Streamlit still **re-scores in the app** on load; the commit supplies fresher **inputs**, not pre-baked scores in the UI. |
-| Secrets | No API key required for public Yahoo data via `yfinance`. |
+| Secrets | Yahoo needs no key. **Supabase log:** set GitHub Actions secrets `SUPABASE_URL` + `SUPABASE_KEY` (service_role) and run `sql/pipeline_runs_supabase.sql`. |
 
 Local full refresh (same as CI):
 
@@ -307,6 +307,22 @@ Partial / smoke:
 
 ```bash
 python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv --max-tickers 50
+```
+
+### Log pipeline runs to Supabase
+
+1. In Supabase SQL editor, run `sql/pipeline_runs_supabase.sql`.
+2. GitHub → **Settings → Secrets and variables → Actions** → add:
+   - `SUPABASE_URL` = `https://xxxx.supabase.co`
+   - `SUPABASE_KEY` = service_role key (same as Streamlit `[supabase].key`)
+3. Each daily (or manual) workflow run inserts/upserts a row in `pipeline_runs`.
+4. In the app, open **Data provenance details** to see recent runs.
+
+```bash
+# Manual log (local)
+$env:SUPABASE_URL="https://xxxx.supabase.co"
+$env:SUPABASE_KEY="eyJ..."
+python scripts/log_pipeline_supabase.py --meta fundamentals_meta.json --summary artifacts/score_summary.json --status success
 ```
 
 Local batch score only (no fetch):

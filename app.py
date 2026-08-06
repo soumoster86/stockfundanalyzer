@@ -404,6 +404,49 @@ with st.expander("Data provenance details", expanded=False):
     st.caption(
         f"Session source label: `{data_source_label}` · fiscal range: {_fiscal_txt}"
     )
+    # Recent GitHub pipeline runs stored in Supabase (if configured)
+    try:
+        from src.pipeline_log_supabase import fetch_recent_runs
+        from src.watchlist_supabase import is_configured as _sb_ok
+
+        if _sb_ok():
+            st.markdown("**Recent pipeline runs (Supabase)**")
+            _runs = fetch_recent_runs(limit=8)
+            if not _runs:
+                st.caption(
+                    "No rows in `pipeline_runs` yet — run the daily Action after "
+                    "applying `sql/pipeline_runs_supabase.sql` and setting "
+                    "GitHub secrets `SUPABASE_URL` / `SUPABASE_KEY`."
+                )
+            else:
+                import pandas as _pd
+
+                _df_runs = _pd.DataFrame(_runs)
+                _show = [
+                    c
+                    for c in (
+                        "finished_at",
+                        "status",
+                        "n_tickers",
+                        "avg_quality",
+                        "n_data_warnings",
+                        "workflow_run",
+                        "ref",
+                    )
+                    if c in _df_runs.columns
+                ]
+                st.dataframe(
+                    _df_runs[_show] if _show else _df_runs,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        else:
+            st.caption(
+                "Configure Supabase secrets to load pipeline history from "
+                "`pipeline_runs`."
+            )
+    except Exception as _e:
+        st.caption(f"Pipeline history unavailable: {_e}")
 
 # Optional governance overlay (before scoring so red flags see the fields)
 if gov_file is not None:

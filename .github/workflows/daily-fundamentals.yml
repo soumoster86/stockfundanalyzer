@@ -65,6 +65,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install "yfinance>=0.2.40"
+          # supabase already in requirements.txt (pipeline log + watchlists)
 
       - name: Resolve options
         id: opts
@@ -145,6 +146,7 @@ jobs:
           PY
 
       - name: Re-score universe
+        id: rescore
         run: |
           EXTRA=""
           if [ "${{ steps.opts.outputs.use_sector }}" = "true" ]; then
@@ -152,7 +154,52 @@ jobs:
           fi
           python scripts/rescore.py --in fundamentals.csv --out-dir artifacts $EXTRA
 
+      - name: Enrich meta with pipeline options
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("fundamentals_meta.json")
+          meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+          meta["commit_csv"] = "${{ steps.opts.outputs.commit_csv }}"
+          meta["use_sector"] = "${{ steps.opts.outputs.use_sector }}"
+          meta["sleep_s"] = "${{ steps.opts.outputs.sleep_s }}"
+          meta["stocks_csv"] = "${{ steps.opts.outputs.stocks_csv }}"
+          p.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+          Path("artifacts").mkdir(exist_ok=True)
+          Path("artifacts/fetch_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+          PY
+
+      - name: Log pipeline run to Supabase
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          STATUS="success"
+          ERR=""
+          if [ "${{ job.status }}" != "success" ]; then
+            STATUS="failed"
+            ERR="GitHub job status=${{ job.status }}"
+          elif [ ! -f artifacts/score_summary.json ]; then
+            STATUS="partial"
+            ERR="Missing score_summary.json after fetch"
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "::warning::SUPABASE_URL / SUPABASE_KEY secrets not set — skip Supabase log"
+            echo "Add repo secrets: Settings → Secrets and variables → Actions"
+            exit 0
+          fi
+          python scripts/log_pipeline_supabase.py \
+            --meta fundamentals_meta.json \
+            --summary artifacts/score_summary.json \
+            --status "$STATUS" \
+            --error "$ERR" \
+            --require-config || echo "::warning::Supabase log failed (table missing? run sql/pipeline_runs_supabase.sql)"
+
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: daily-fundamentals-${{ github.run_id }}
@@ -161,9 +208,10 @@ jobs:
             fundamentals_meta.json
             artifacts/
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Commit fundamentals.csv + meta (for Streamlit Cloud)
-        if: steps.opts.outputs.commit_csv == 'true'
+        if: success() && steps.opts.outputs.commit_csv == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -198,4 +246,5 @@ jobs:
             echo ""
             echo "- Commit CSV: \`${{ steps.opts.outputs.commit_csv }}\`"
             echo "- Sector-relative: \`${{ steps.opts.outputs.use_sector }}\`"
+            echo "- Supabase log: uses secrets \`SUPABASE_URL\` + \`SUPABASE_KEY\`"
           } >> "$GITHUB_STEP_SUMMARY"
