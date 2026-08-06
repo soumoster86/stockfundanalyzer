@@ -321,6 +321,7 @@ from src.data_freshness import (
     format_freshness_detail,
     format_freshness_line,
     is_github_daily,
+    latest_success_meta_from_supabase,
     load_fundamentals_meta,
 )
 
@@ -355,6 +356,13 @@ _using_project_fundamentals = (
         "labeled.csv",
     )
 )
+# Prefer committed meta file; fall back to latest successful Supabase pipeline_runs row
+_meta_source = "file"
+if not is_github_daily(_fund_meta) and _using_project_fundamentals:
+    _sb_meta = latest_success_meta_from_supabase()
+    if _sb_meta:
+        _fund_meta = _sb_meta
+        _meta_source = "supabase"
 _ci_active = _using_project_fundamentals and is_github_daily(_fund_meta)
 
 if _ci_active:
@@ -362,6 +370,18 @@ if _ci_active:
     _run_url = (_fund_meta or {}).get("workflow_url")
     if _run_url:
         st.caption(f"[Open this GitHub Actions run]({_run_url})")
+    elif (_fund_meta or {}).get("workflow_run") and (_fund_meta or {}).get("repository"):
+        _rid = _fund_meta["workflow_run"]
+        _repo = _fund_meta["repository"]
+        st.caption(
+            f"[Open Actions run {_rid}](https://github.com/{_repo}/actions/runs/{_rid})"
+        )
+    if _meta_source == "supabase":
+        st.caption(
+            "Provenance from **Supabase** `pipeline_runs` "
+            "(repo file `fundamentals_meta.json` not present yet — usually means "
+            "the Action logged OK but **git push** of the CSV/meta failed)."
+        )
 elif uploaded is not None:
     st.info(
         f"**Data source:** {data_source_label} · **session upload** "
@@ -387,9 +407,9 @@ else:
     )
     if _using_project_fundamentals and not is_github_daily(_fund_meta):
         st.caption(
-            "No GitHub daily-pipeline stamp yet. After **Actions → Daily fundamentals "
-            "+ rankings** commits `fundamentals_meta.json`, this banner will show the "
-            "pipeline run time and id."
+            "No GitHub daily-pipeline stamp yet (file or Supabase). "
+            "After a successful **Daily fundamentals + rankings** run that "
+            "**pushes** to `main`, this banner turns green."
         )
 
 with st.expander("Data provenance details", expanded=False):

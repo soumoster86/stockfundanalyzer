@@ -213,16 +213,27 @@ jobs:
       - name: Commit fundamentals.csv + meta (for Streamlit Cloud)
         if: success() && steps.opts.outputs.commit_csv == 'true'
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # data/ and artifacts/ are gitignored — commit panel + provenance meta
-          # so Streamlit Cloud redeploys and can show "from GitHub daily run".
+          # Rebase onto latest remote so push doesn't fail when main moved during the long fetch
+          git fetch origin "${{ github.ref_name }}"
+          git pull --rebase --autostash origin "${{ github.ref_name }}" || {
+            echo "::warning::Rebase had conflicts; retrying with ours for data files"
+            git rebase --abort || true
+            git pull --rebase -X ours origin "${{ github.ref_name }}" || true
+          }
           git add fundamentals.csv fundamentals_meta.json
           if git diff --staged --quiet; then
             echo "No changes to commit (fundamentals unchanged)."
           else
             git commit -m "chore: daily fundamentals refresh (${{ github.run_id }})"
-            git push origin HEAD:${{ github.ref_name }}
+            # Retry push once after rebase if rejected
+            if ! git push origin "HEAD:${{ github.ref_name }}"; then
+              echo "Push rejected — pull --rebase and retry"
+              git pull --rebase origin "${{ github.ref_name }}"
+              git push origin "HEAD:${{ github.ref_name }}"
+            fi
           fi
 
       - name: Job summary

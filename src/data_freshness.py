@@ -47,6 +47,38 @@ def is_github_daily(meta: dict[str, Any] | None) -> bool:
     return "github-actions" in src or "daily-fundamentals" in src
 
 
+def meta_from_pipeline_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Map a Supabase pipeline_runs row into fundamentals-meta shape."""
+    if not row:
+        return {}
+    return {
+        "source": row.get("source") or "github-actions daily-fundamentals",
+        "generated_at_utc": row.get("finished_at") or row.get("created_at"),
+        "n_tickers": row.get("n_tickers"),
+        "n_rows": row.get("n_rows"),
+        "workflow_run": row.get("workflow_run"),
+        "workflow_url": row.get("workflow_url"),
+        "ref": row.get("ref"),
+        "repository": row.get("repository"),
+        "avg_quality": row.get("avg_quality"),
+        "status": row.get("status"),
+        "from_supabase": True,
+    }
+
+
+def latest_success_meta_from_supabase() -> dict[str, Any] | None:
+    """Best-effort: latest successful pipeline_runs row (for banner fallback)."""
+    try:
+        from src.pipeline_log_supabase import fetch_recent_runs
+
+        for row in fetch_recent_runs(limit=5):
+            if str(row.get("status") or "").lower() == "success":
+                return meta_from_pipeline_row(row)
+    except Exception:
+        return None
+    return None
+
+
 def format_freshness_line(
     meta: dict[str, Any] | None,
     *,
@@ -59,16 +91,23 @@ def format_freshness_line(
     """
     if meta and is_github_daily(meta):
         when = meta.get("generated_at_utc") or meta.get("generated_at") or "?"
+        # ISO with timezone offset from Supabase
+        when_disp = str(when).replace("+00:00", "Z")
         n = meta.get("n_tickers")
         run = meta.get("workflow_run") or meta.get("run_id")
         bits = [
             "🔄 **GitHub daily pipeline**",
-            f"fetched **{when}** UTC",
+            f"fetched **{when_disp}**",
         ]
         if n is not None:
-            bits.append(f"**{n:,}** tickers" if isinstance(n, int) else f"**{n}** tickers")
+            try:
+                bits.append(f"**{int(n):,}** tickers")
+            except (TypeError, ValueError):
+                bits.append(f"**{n}** tickers")
         if run:
             bits.append(f"run `{run}`")
+        if meta.get("from_supabase"):
+            bits.append("via **Supabase** log")
         age = _age_hint(str(when))
         if age:
             bits.append(age)

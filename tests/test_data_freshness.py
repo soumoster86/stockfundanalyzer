@@ -37,3 +37,20 @@ def test_write_and_load_meta(tmp_path: Path):
 def test_format_without_meta():
     line = format_freshness_line(None, data_source_label="Project: fundamentals.csv")
     assert "fundamentals" in line.lower() or "Project" in line
+
+
+def test_meta_from_pipeline_row():
+    from src.data_freshness import meta_from_pipeline_row
+
+    m = meta_from_pipeline_row(
+        {
+            "source": "github-actions daily-fundamentals",
+            "finished_at": "2026-08-06T16:05:16+00:00",
+            "n_tickers": 2367,
+            "workflow_run": "31115210975",
+            "status": "success",
+        }
+    )
+    assert m["from_supabase"] is True
+    assert is_github_daily(m)
+    assert "2367" in format_freshness_line(m)
