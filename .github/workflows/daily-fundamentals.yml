@@ -211,30 +211,50 @@ jobs:
           if-no-files-found: warn
 
       - name: Commit fundamentals.csv + meta (for Streamlit Cloud)
+        # Long Yahoo fetches often leave the runner behind origin/main → plain
+        # "git push" fails with "fetch first". Commit first, then rebase+retry.
         if: success() && steps.opts.outputs.commit_csv == 'true'
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
-          set -e
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Rebase onto latest remote so push doesn't fail when main moved during the long fetch
-          git fetch origin "${{ github.ref_name }}"
-          git pull --rebase --autostash origin "${{ github.ref_name }}" || {
-            echo "::warning::Rebase had conflicts; retrying with ours for data files"
-            git rebase --abort || true
-            git pull --rebase -X ours origin "${{ github.ref_name }}" || true
-          }
+
           git add fundamentals.csv fundamentals_meta.json
           if git diff --staged --quiet; then
             echo "No changes to commit (fundamentals unchanged)."
-          else
-            git commit -m "chore: daily fundamentals refresh (${{ github.run_id }})"
-            # Retry push once after rebase if rejected
-            if ! git push origin "HEAD:${{ github.ref_name }}"; then
-              echo "Push rejected — pull --rebase and retry"
-              git pull --rebase origin "${{ github.ref_name }}"
-              git push origin "HEAD:${{ github.ref_name }}"
-            fi
+            exit 0
           fi
+          git commit -m "chore: daily fundamentals refresh (${{ github.run_id }})"
+
+          # main may have new commits while this job ran (45m+). Rebase and push.
+          for attempt in 1 2 3 4 5; do
+            echo "=== Push attempt ${attempt} ==="
+            git fetch origin "${BRANCH}"
+            if ! git rebase "origin/${BRANCH}"; then
+              echo "Rebase conflict — keep runner versions of data files"
+              # During rebase: "theirs" = our commit being replayed
+              git checkout --theirs -- fundamentals.csv fundamentals_meta.json || true
+              git add fundamentals.csv fundamentals_meta.json
+              GIT_EDITOR=true git rebase --continue || {
+                git rebase --abort || true
+                # Soft fallback: rebuild one commit on top of remote tip
+                git reset --soft "origin/${BRANCH}"
+                git add fundamentals.csv fundamentals_meta.json
+                git diff --staged --quiet || \
+                  git commit -m "chore: daily fundamentals refresh (${{ github.run_id }})"
+              }
+            fi
+            if git push origin "HEAD:${BRANCH}"; then
+              echo "Pushed successfully on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Push rejected (non-fast-forward). Retrying..."
+            sleep 3
+          done
+          echo "::error::Could not push fundamentals after 5 attempts. Check Actions write permissions."
+          exit 1
 
       - name: Job summary
         if: always()
