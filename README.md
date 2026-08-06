@@ -258,16 +258,56 @@ Env fallbacks: `SUPABASE_URL`, `SUPABASE_KEY` (or `SUPABASE_SERVICE_KEY`).
 If Supabase is misconfigured or unreachable, the app falls back to the session
 cache and shows a warning on the Watchlist page.
 
-## CI & monthly re-score
+## CI, daily fundamentals & re-score
 
 GitHub Actions:
 
 - `.github/workflows/ci.yml` — pytest + ruff on push/PR; offline rescore smoke.
-- `.github/workflows/monthly-rescore.yml` — 1st of each month (or manual
-  `workflow_dispatch`) scores `fundamentals.csv` if present else `demo_data.csv`,
-  uploads `artifacts/` (rankings + summary JSON).
+- `.github/workflows/daily-fundamentals.yml` — **daily** (02:00 UTC) Yahoo fetch
+  of `stocks.csv` → `fundamentals.csv` → offline rank → upload artifacts →
+  **commit** `fundamentals.csv` so Streamlit Cloud can redeploy with fresher data.
+- `.github/workflows/monthly-rescore.yml` — 1st of each month (or manual) scores
+  whatever panel is in the repo (no Yahoo fetch).
 
-Local batch score:
+### Daily pipeline (latest rankings)
+
+1. Keep a ticker list in the repo as **`stocks.csv`** (`ticker` or `symbol` column).
+2. Enable Actions on the repo (Settings → Actions → Allow).
+3. Wait for the schedule, or run manually:
+   - **Actions → Daily fundamentals + rankings → Run workflow**
+   - Optional inputs: `max_tickers` (e.g. `50` for a smoke test), `commit_csv`,
+     `use_sector`, `sleep_s`.
+4. On success:
+   - Artifact `daily-fundamentals-<run_id>` contains `fundamentals.csv` +
+     `artifacts/rankings_latest.csv`
+   - If `commit_csv=true` (default), `fundamentals.csv` is pushed to the branch
+     → Streamlit Cloud rebuilds and Ranking uses the new panel.
+
+**Caveats**
+
+| Topic | Detail |
+|-------|--------|
+| Runtime | ~2k NSE names can take **1–4+ hours** (Yahoo + sleep). Timeout is 6h. |
+| Reliability | Yahoo rate-limits / blanks are normal; some tickers stay sparse. |
+| Git size | Daily commits of a multi‑MB CSV grow history; prune or LFS later if needed. |
+| Cloud | Streamlit still **re-scores in the app** on load; the commit supplies fresher **inputs**, not pre-baked scores in the UI. |
+| Secrets | No API key required for public Yahoo data via `yfinance`. |
+
+Local full refresh (same as CI):
+
+```bash
+pip install yfinance
+python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv --sleep 0.4
+python scripts/rescore.py --in fundamentals.csv --out-dir artifacts --use-sector
+```
+
+Partial / smoke:
+
+```bash
+python -m src.fetch_fundamentals --in stocks.csv --out fundamentals.csv --max-tickers 50
+```
+
+Local batch score only (no fetch):
 
 ```bash
 python scripts/rescore.py --in demo_data.csv --out-dir artifacts
@@ -284,7 +324,7 @@ src/
   institutional_scores.py, flag_lists.py, ...
 sql/watchlist_supabase.sql   # Supabase table DDL
 scripts/rescore.py     # Offline / CI batch score
-.github/workflows/     # CI + monthly re-score
+.github/workflows/     # CI + daily fundamentals + monthly re-score
 tests/
 demo_data.csv
 requirements.txt       # Pinned Cloud runtime

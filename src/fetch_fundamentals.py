@@ -192,6 +192,12 @@ def main():
     ap.add_argument("--in", dest="infile", required=True, help="CSV with ticker,date")
     ap.add_argument("--out", dest="outfile", default="fundamentals.csv")
     ap.add_argument("--sleep", type=float, default=0.5, help="seconds between calls")
+    ap.add_argument(
+        "--max-tickers",
+        type=int,
+        default=0,
+        help="If >0, only fetch the first N unique tickers (CI smoke / partial runs).",
+    )
     args = ap.parse_args()
 
     src = pd.read_csv(args.infile)
@@ -212,6 +218,9 @@ def main():
     if "date" not in src.columns:
         src["date"] = ""  # date is informational; yfinance returns latest statements
     src = src.drop_duplicates(subset=["ticker"]).reset_index(drop=True)
+    if args.max_tickers and args.max_tickers > 0:
+        src = src.head(int(args.max_tickers)).reset_index(drop=True)
+        print(f"Limited to first {len(src)} tickers (--max-tickers={args.max_tickers})")
     print(f"Fetching {len(src)} unique tickers (ticker column: '{found}')...")
 
     all_rows = []
@@ -236,7 +245,8 @@ def main():
           f"(governance/label fields intentionally blank)")
     if failures:
         print(f"{len(failures)} tickers had no data (likely ETFs/funds or delisted): "
-              f"{', '.join(failures)}")
+              f"{', '.join(failures[:20])}"
+              + (f" … +{len(failures)-20} more" if len(failures) > 20 else ""))
 
 
 if __name__ == "__main__":

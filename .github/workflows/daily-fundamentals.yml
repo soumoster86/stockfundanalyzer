@@ -1,0 +1,193 @@
+name: Daily fundamentals + rankings
+
+# Fetches Yahoo fundamentals for tickers in stocks.csv, writes fundamentals.csv,
+# re-scores the universe, uploads artifacts, and (optionally) commits the CSV so
+# Streamlit Cloud can redeploy with fresher rankings.
+#
+# Notes
+# -----
+# * Full India lists (~2k tickers) can take 1–4+ hours; job timeout is 6h.
+# * Yahoo is rate-limited / flaky — partial blanks are normal for some names.
+# * Scheduled runs only fire on the default branch; use "Run workflow" to test.
+# * First enable: Actions → this workflow → ensure Actions are allowed for the repo.
+
+on:
+  schedule:
+    # 02:00 UTC daily (~07:30 IST)
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      max_tickers:
+        description: "Max tickers to fetch (0 = all in stocks.csv)"
+        required: false
+        default: "0"
+      sleep_s:
+        description: "Seconds between Yahoo calls"
+        required: false
+        default: "0.4"
+      use_sector:
+        description: "Sector-relative quality (true/false)"
+        required: false
+        default: "true"
+      commit_csv:
+        description: "Commit fundamentals.csv back to the branch (true/false)"
+        required: false
+        default: "true"
+      stocks_csv:
+        description: "Ticker list CSV in the repo"
+        required: false
+        default: "stocks.csv"
+
+concurrency:
+  group: daily-fundamentals
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-and-rank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "yfinance>=0.2.40"
+
+      - name: Resolve options
+        id: opts
+        shell: bash
+        run: |
+          MAX="${{ github.event.inputs.max_tickers }}"
+          SLEEP="${{ github.event.inputs.sleep_s }}"
+          USE_SECTOR="${{ github.event.inputs.use_sector }}"
+          COMMIT="${{ github.event.inputs.commit_csv }}"
+          STOCKS="${{ github.event.inputs.stocks_csv }}"
+          # Defaults for scheduled runs (no inputs)
+          [ -z "$MAX" ] && MAX="0"
+          [ -z "$SLEEP" ] && SLEEP="0.4"
+          [ -z "$USE_SECTOR" ] && USE_SECTOR="true"
+          [ -z "$COMMIT" ] && COMMIT="true"
+          [ -z "$STOCKS" ] && STOCKS="stocks.csv"
+          echo "max_tickers=$MAX" >> "$GITHUB_OUTPUT"
+          echo "sleep_s=$SLEEP" >> "$GITHUB_OUTPUT"
+          echo "use_sector=$USE_SECTOR" >> "$GITHUB_OUTPUT"
+          echo "commit_csv=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "stocks_csv=$STOCKS" >> "$GITHUB_OUTPUT"
+          echo "Resolved: max=$MAX sleep=$SLEEP sector=$USE_SECTOR commit=$COMMIT stocks=$STOCKS"
+
+      - name: Require ticker list
+        run: |
+          if [ ! -f "${{ steps.opts.outputs.stocks_csv }}" ]; then
+            echo "::error::Missing ${{ steps.opts.outputs.stocks_csv }}. Commit a ticker list (column ticker or symbol)."
+            exit 1
+          fi
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          p = Path("${{ steps.opts.outputs.stocks_csv }}")
+          df = pd.read_csv(p)
+          print(f"Ticker list: {p} rows={len(df)} cols={list(df.columns)}")
+          PY
+
+      - name: Fetch fundamentals (Yahoo)
+        run: |
+          EXTRA=""
+          MAX="${{ steps.opts.outputs.max_tickers }}"
+          if [ "$MAX" != "0" ] && [ -n "$MAX" ]; then
+            EXTRA="--max-tickers $MAX"
+          fi
+          python -m src.fetch_fundamentals \
+            --in "${{ steps.opts.outputs.stocks_csv }}" \
+            --out fundamentals.csv \
+            --sleep "${{ steps.opts.outputs.sleep_s }}" \
+            $EXTRA
+
+      - name: Write fetch metadata
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import pandas as pd
+          p = Path("fundamentals.csv")
+          df = pd.read_csv(p) if p.exists() else None
+          meta = {
+              "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "source": "github-actions daily-fundamentals",
+              "n_rows": int(len(df)) if df is not None else 0,
+              "n_tickers": int(df["ticker"].nunique()) if df is not None and "ticker" in df.columns else 0,
+              "workflow_run": "${{ github.run_id }}",
+              "ref": "${{ github.ref_name }}",
+          }
+          Path("artifacts").mkdir(exist_ok=True)
+          Path("artifacts/fetch_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+          print(json.dumps(meta, indent=2))
+          PY
+
+      - name: Re-score universe
+        run: |
+          EXTRA=""
+          if [ "${{ steps.opts.outputs.use_sector }}" = "true" ]; then
+            EXTRA="--use-sector"
+          fi
+          python scripts/rescore.py --in fundamentals.csv --out-dir artifacts $EXTRA
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-fundamentals-${{ github.run_id }}
+          path: |
+            fundamentals.csv
+            artifacts/
+          retention-days: 30
+
+      - name: Commit fundamentals.csv (for Streamlit Cloud)
+        if: steps.opts.outputs.commit_csv == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # data/ and artifacts/ are gitignored — only the fundamentals panel is committed
+          # so Streamlit Cloud redeploys with a fresher universe to re-score on load.
+          git add fundamentals.csv
+          if git diff --staged --quiet; then
+            echo "No changes to commit (fundamentals.csv unchanged)."
+          else
+            git commit -m "chore: daily fundamentals refresh (${{ github.run_id }})"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Daily fundamentals + rankings"
+            echo ""
+            if [ -f artifacts/fetch_meta.json ]; then
+              echo '### Fetch'
+              echo '```json'
+              cat artifacts/fetch_meta.json
+              echo '```'
+            fi
+            if [ -f artifacts/score_summary.json ]; then
+              echo '### Score summary'
+              echo '```json'
+              cat artifacts/score_summary.json
+              echo '```'
+            fi
+            echo ""
+            echo "- Commit CSV: \`${{ steps.opts.outputs.commit_csv }}\`"
+            echo "- Sector-relative: \`${{ steps.opts.outputs.use_sector }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
