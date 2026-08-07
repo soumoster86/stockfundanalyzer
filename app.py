@@ -644,22 +644,32 @@ if "nav_mode" not in st.session_state:
 if "nav_page" not in st.session_state or st.session_state["nav_page"] not in ALL_PAGES:
     st.session_state["nav_page"] = NAV_BY_MODE[NAV_MODES[0]][0]
 
-mode = st.radio(
+# Native pill buttons (Streamlit 1.33+) — CSS cannot restyle st.radio circles
+# into capsules in recent Streamlit builds; st.pills is the supported control.
+mode = st.pills(
     "Mode",
     NAV_MODES,
-    horizontal=True,
+    selection_mode="single",
+    required=True,
     key="nav_mode",
     help="Research = daily work · Context = compare & sectors · Tools = train & tutorial",
 )
-page = ensure_page_in_mode(st.session_state, mode)
+if mode not in NAV_BY_MODE:
+    mode = NAV_MODES[0]
+    st.session_state["nav_mode"] = mode
+ensure_page_in_mode(st.session_state, mode)
 page_options = NAV_BY_MODE[mode]
-page = st.radio(
+page = st.pills(
     "Page",
     page_options,
-    horizontal=True,
+    selection_mode="single",
+    required=True,
     key="nav_page",
     label_visibility="collapsed",
 )
+if page not in page_options:
+    page = page_options[0]
+    st.session_state["nav_page"] = page
 
 # Universe metrics only where they help (not on deep single-stock report / tools)
 if page in SHOW_UNIVERSE_BANNER:

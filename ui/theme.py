@@ -56,7 +56,7 @@ BAND_EMOJI = {
 def inject_global_css() -> None:
     """Once-per-session visual polish for Streamlit chrome."""
     # Bump version when CSS rules change so open sessions pick up new styles
-    _CSS_VER = 3
+    _CSS_VER = 4
     if st.session_state.get("_css_ver") == _CSS_VER:
         return
     st.session_state["_css_ver"] = _CSS_VER
@@ -78,7 +78,6 @@ def inject_global_css() -> None:
     letter-spacing: -0.025em;
     font-weight: 700 !important;
   }}
-  /* Softer main text */
   .stMarkdown, .stCaption, p {{
     line-height: 1.45;
   }}
@@ -95,78 +94,72 @@ def inject_global_css() -> None:
   div[data-testid="stMetricValue"] {{ font-weight: 700; letter-spacing: -0.02em; }}
 
   /* =========================================================
-     Radio pills — match dark capsule nav (circle + label)
-     Works for horizontal Mode / Page radios and vertical ones
+     Native st.pills — dark capsules (Mode / Page nav)
+     Streamlit 1.33+; radios cannot be restyled reliably in 1.56
      ========================================================= */
-  div[data-testid="stRadio"] > label {{
+  div[data-testid="stPills"] {{
+    margin-bottom: 0.35rem !important;
+  }}
+  div[data-testid="stPills"] > label {{
     font-size: 0.8rem !important;
     color: {MUTED} !important;
     font-weight: 600 !important;
     letter-spacing: 0.02em;
-    margin-bottom: 0.35rem !important;
   }}
-  div[data-testid="stRadio"] div[role="radiogroup"],
-  div[role="radiogroup"] {{
+  /* Pill button row */
+  div[data-testid="stPills"] [role="group"],
+  div[data-testid="stPills"] [data-baseweb="button-group"],
+  div[data-testid="stPills"] > div > div {{
     display: flex !important;
-    flex-direction: row !important;
     flex-wrap: wrap !important;
-    gap: 0.5rem !important;
-    align-items: center !important;
-  }}
-  /* Each option as a dark capsule */
-  div[data-testid="stRadio"] div[role="radiogroup"] label,
-  div[role="radiogroup"] label {{
-    display: inline-flex !important;
-    align-items: center !important;
     gap: 0.45rem !important;
+    row-gap: 0.45rem !important;
+  }}
+  /* Individual pill (button) */
+  div[data-testid="stPills"] button,
+  div[data-testid="stPills"] [data-baseweb="button"],
+  div[data-testid="stPills"] [role="button"] {{
     background: #12171f !important;
     border: 1px solid #2a3340 !important;
     border-radius: 999px !important;
-    padding: 0.42rem 1.05rem 0.42rem 0.75rem !important;
-    margin: 0 !important;
-    min-height: 2.35rem !important;
-    box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset,
-                0 4px 14px rgba(0,0,0,0.25) !important;
-    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease !important;
-    cursor: pointer !important;
     color: {TEXT} !important;
     font-weight: 500 !important;
     font-size: 0.9rem !important;
+    min-height: 2.4rem !important;
+    padding: 0.4rem 1.15rem !important;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset,
+                0 4px 14px rgba(0,0,0,0.22) !important;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease !important;
   }}
-  div[data-testid="stRadio"] div[role="radiogroup"] label:hover,
-  div[role="radiogroup"] label:hover {{
+  div[data-testid="stPills"] button:hover,
+  div[data-testid="stPills"] [data-baseweb="button"]:hover {{
     border-color: #3d4a5c !important;
     background: #161c26 !important;
   }}
-  /* Selected capsule */
-  div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked),
-  div[role="radiogroup"] label:has(input:checked) {{
-    background: linear-gradient(180deg, rgba(29,158,117,0.16), rgba(29,158,117,0.08)) !important;
+  /* Selected pill */
+  div[data-testid="stPills"] button[aria-pressed="true"],
+  div[data-testid="stPills"] button[kind="primary"],
+  div[data-testid="stPills"] [aria-checked="true"],
+  div[data-testid="stPills"] button[data-selected="true"] {{
+    background: linear-gradient(180deg, rgba(29,158,117,0.22), rgba(29,158,117,0.10)) !important;
     border-color: {GREEN} !important;
-    box-shadow: 0 0 0 1px rgba(29,158,117,0.25),
-                0 4px 16px rgba(29,158,117,0.12) !important;
     color: {TEXT} !important;
+    box-shadow: 0 0 0 1px rgba(29,158,117,0.28),
+                0 4px 16px rgba(29,158,117,0.14) !important;
   }}
-  /* Hide default Streamlit radio chrome slightly; keep circular control look */
-  div[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child,
-  div[role="radiogroup"] label > div:first-child {{
-    margin-right: 0 !important;
+
+  /* Fallback: if any st.radio remains, try capsule labels */
+  div[data-testid="stRadio"] div[role="radiogroup"] {{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
   }}
-  /* Native radio circle tint */
-  div[data-testid="stRadio"] input[type="radio"],
-  div[role="radiogroup"] input[type="radio"] {{
-    accent-color: {GREEN} !important;
-    width: 1rem !important;
-    height: 1rem !important;
-  }}
-  /* Baseweb radio (newer Streamlit) */
-  div[data-testid="stRadio"] [data-baseweb="radio"] {{
-    background: transparent !important;
-  }}
-  div[data-testid="stRadio"] label [data-testid="stMarkdownContainer"] p {{
-    margin: 0 !important;
-    color: inherit !important;
-    font-size: 0.9rem !important;
+  div[data-testid="stRadio"] label[data-baseweb="radio"],
+  div[data-testid="stRadio"] > div > label {{
+    background: #12171f !important;
+    border: 1px solid #2a3340 !important;
+    border-radius: 999px !important;
+    padding: 0.4rem 1rem !important;
   }}
 
   /* ---- Tabs (Report sub-tabs etc.) ---- */

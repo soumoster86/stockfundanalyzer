@@ -21,6 +21,13 @@ def test_all_pages_mapped():
     assert NAV_MODES == ["Research", "Context", "Tools"]
 
 
+def test_streamlit_has_pills():
+    """Nav uses st.pills for capsule UI (Streamlit ≥1.33)."""
+    import streamlit as st
+
+    assert hasattr(st, "pills"), "Upgrade streamlit for pill navigation UI"
+
+
 def test_resolve_pending_nav_sets_mode_and_page():
     ss = _SS()
     ss["_pending_nav"] = "Single Stock Report"
