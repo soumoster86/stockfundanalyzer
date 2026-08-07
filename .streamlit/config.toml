@@ -5,6 +5,8 @@ backgroundColor = "#0D1117"
 secondaryBackgroundColor = "#161B22"
 textColor = "#E6EDF3"
 font = "sans serif"
+# Rounded controls align with pill radios / modern chrome
+# (detailed styling is in ui/theme.py inject_global_css)
 
 [server]
 maxUploadSize = 50

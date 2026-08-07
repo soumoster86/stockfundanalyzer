@@ -56,54 +56,238 @@ BAND_EMOJI = {
 def inject_global_css() -> None:
     """Once-per-session visual polish for Streamlit chrome."""
     # Bump version when CSS rules change so open sessions pick up new styles
-    _CSS_VER = 2
+    _CSS_VER = 3
     if st.session_state.get("_css_ver") == _CSS_VER:
         return
     st.session_state["_css_ver"] = _CSS_VER
     st.markdown(
         f"""
 <style>
-  /* ---- Base ---- */
+  /* ---- Base shell ---- */
+  .stApp {{
+    background: radial-gradient(1200px 600px at 10% -10%, rgba(29,158,117,0.07), transparent 55%),
+                radial-gradient(900px 500px at 100% 0%, rgba(55,138,221,0.05), transparent 50%),
+                {SURFACE_2} !important;
+  }}
   .block-container {{
-    padding-top: 1.2rem;
-    padding-bottom: 3rem;
-    max-width: 1400px;
+    padding-top: 1.1rem;
+    padding-bottom: 3.5rem;
+    max-width: 1380px;
   }}
-  h1, h2, h3 {{ letter-spacing: -0.02em; }}
-  div[data-testid="stMetric"] {{
-    background: {SURFACE};
-    border: 1px solid {BORDER};
-    border-radius: 12px;
-    padding: 0.75rem 0.9rem;
+  h1, h2, h3 {{
+    letter-spacing: -0.025em;
+    font-weight: 700 !important;
   }}
-  div[data-testid="stMetric"] label {{ color: {MUTED} !important; }}
-  div[data-testid="stMetricValue"] {{ font-weight: 700; }}
+  /* Softer main text */
+  .stMarkdown, .stCaption, p {{
+    line-height: 1.45;
+  }}
 
-  /* Horizontal nav radio as pill bar */
-  div[role="radiogroup"] {{
-    gap: 0.35rem !important;
-    flex-wrap: wrap !important;
+  /* ---- Metrics ---- */
+  div[data-testid="stMetric"] {{
+    background: linear-gradient(180deg, #1a212b 0%, {SURFACE} 100%);
+    border: 1px solid {BORDER};
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 24px rgba(0,0,0,0.18);
   }}
+  div[data-testid="stMetric"] label {{ color: {MUTED} !important; font-size: 0.8rem !important; }}
+  div[data-testid="stMetricValue"] {{ font-weight: 700; letter-spacing: -0.02em; }}
+
+  /* =========================================================
+     Radio pills — match dark capsule nav (circle + label)
+     Works for horizontal Mode / Page radios and vertical ones
+     ========================================================= */
+  div[data-testid="stRadio"] > label {{
+    font-size: 0.8rem !important;
+    color: {MUTED} !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em;
+    margin-bottom: 0.35rem !important;
+  }}
+  div[data-testid="stRadio"] div[role="radiogroup"],
+  div[role="radiogroup"] {{
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
+    align-items: center !important;
+  }}
+  /* Each option as a dark capsule */
+  div[data-testid="stRadio"] div[role="radiogroup"] label,
   div[role="radiogroup"] label {{
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.45rem !important;
+    background: #12171f !important;
+    border: 1px solid #2a3340 !important;
+    border-radius: 999px !important;
+    padding: 0.42rem 1.05rem 0.42rem 0.75rem !important;
+    margin: 0 !important;
+    min-height: 2.35rem !important;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset,
+                0 4px 14px rgba(0,0,0,0.25) !important;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease !important;
+    cursor: pointer !important;
+    color: {TEXT} !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+  }}
+  div[data-testid="stRadio"] div[role="radiogroup"] label:hover,
+  div[role="radiogroup"] label:hover {{
+    border-color: #3d4a5c !important;
+    background: #161c26 !important;
+  }}
+  /* Selected capsule */
+  div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked),
+  div[role="radiogroup"] label:has(input:checked) {{
+    background: linear-gradient(180deg, rgba(29,158,117,0.16), rgba(29,158,117,0.08)) !important;
+    border-color: {GREEN} !important;
+    box-shadow: 0 0 0 1px rgba(29,158,117,0.25),
+                0 4px 16px rgba(29,158,117,0.12) !important;
+    color: {TEXT} !important;
+  }}
+  /* Hide default Streamlit radio chrome slightly; keep circular control look */
+  div[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child,
+  div[role="radiogroup"] label > div:first-child {{
+    margin-right: 0 !important;
+  }}
+  /* Native radio circle tint */
+  div[data-testid="stRadio"] input[type="radio"],
+  div[role="radiogroup"] input[type="radio"] {{
+    accent-color: {GREEN} !important;
+    width: 1rem !important;
+    height: 1rem !important;
+  }}
+  /* Baseweb radio (newer Streamlit) */
+  div[data-testid="stRadio"] [data-baseweb="radio"] {{
+    background: transparent !important;
+  }}
+  div[data-testid="stRadio"] label [data-testid="stMarkdownContainer"] p {{
+    margin: 0 !important;
+    color: inherit !important;
+    font-size: 0.9rem !important;
+  }}
+
+  /* ---- Tabs (Report sub-tabs etc.) ---- */
+  button[data-baseweb="tab"] {{
+    border-radius: 999px !important;
+    padding: 0.4rem 0.95rem !important;
+    font-weight: 600 !important;
+    color: {MUTED} !important;
+  }}
+  button[data-baseweb="tab"][aria-selected="true"] {{
+    background: {GREEN_SOFT} !important;
+    color: {GREEN_BORDER} !important;
+  }}
+  div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
+    gap: 0.35rem !important;
+    background: transparent !important;
+    border-bottom: 1px solid {BORDER} !important;
+    padding-bottom: 0.35rem !important;
+  }}
+  div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {{
+    display: none !important;
+  }}
+  div[data-testid="stTabs"] [data-baseweb="tab-border"] {{
+    display: none !important;
+  }}
+
+  /* ---- Primary / secondary buttons ---- */
+  div[data-testid="stButton"] > button {{
+    border-radius: 999px !important;
+    border: 1px solid {BORDER} !important;
+    font-weight: 600 !important;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+  }}
+  div[data-testid="stButton"] > button:hover {{
+    border-color: {GREEN} !important;
+    transform: translateY(-1px);
+  }}
+  div[data-testid="stButton"] > button[kind="primary"],
+  div[data-testid="stButton"] > button[data-testid="baseButton-primary"] {{
+    background: linear-gradient(180deg, #22b885 0%, {GREEN} 100%) !important;
+    border-color: {GREEN_BORDER} !important;
+    color: #04120c !important;
+  }}
+  div[data-testid="stDownloadButton"] > button {{
+    border-radius: 999px !important;
+    border: 1px solid {BORDER} !important;
+  }}
+
+  /* ---- Expanders ---- */
+  div[data-testid="stExpander"] {{
     background: {SURFACE} !important;
     border: 1px solid {BORDER} !important;
-    border-radius: 999px !important;
-    padding: 0.35rem 0.85rem !important;
-    margin-right: 0.15rem !important;
+    border-radius: 14px !important;
+    overflow: hidden;
+    margin-bottom: 0.55rem !important;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.12);
   }}
-  div[role="radiogroup"] label:has(input:checked) {{
-    background: {GREEN_SOFT} !important;
+  div[data-testid="stExpander"] details summary {{
+    font-weight: 600 !important;
+  }}
+
+  /* ---- Inputs / select ---- */
+  div[data-testid="stTextInput"] input,
+  div[data-testid="stNumberInput"] input,
+  div[data-baseweb="select"] > div,
+  div[data-testid="stSelectbox"] > div > div {{
+    border-radius: 12px !important;
+    border-color: {BORDER} !important;
+    background-color: #12171f !important;
+  }}
+  div[data-testid="stTextInput"] input:focus {{
     border-color: {GREEN} !important;
-    color: {GREEN_BORDER} !important;
+    box-shadow: 0 0 0 1px {GREEN}55 !important;
+  }}
+
+  /* ---- Sidebar ---- */
+  section[data-testid="stSidebar"] {{
+    background: linear-gradient(180deg, #11161e 0%, #0c1016 100%) !important;
+    border-right: 1px solid {BORDER} !important;
+  }}
+  section[data-testid="stSidebar"] .block-container {{
+    padding-top: 1.25rem;
+  }}
+
+  /* ---- Alerts / status ---- */
+  div[data-testid="stAlert"] {{
+    border-radius: 12px !important;
+    border: 1px solid {BORDER} !important;
+  }}
+  div[data-testid="stSuccess"] {{
+    background: rgba(29,158,117,0.12) !important;
+    border-color: rgba(29,158,117,0.4) !important;
+  }}
+  div[data-testid="stInfo"] {{
+    background: rgba(55,138,221,0.10) !important;
+    border-color: rgba(55,138,221,0.35) !important;
+  }}
+
+  /* ---- Dataframes ---- */
+  div[data-testid="stDataFrame"] {{
+    border: 1px solid {BORDER} !important;
+    border-radius: 14px !important;
+    overflow: hidden;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  }}
+
+  /* ---- Dividers ---- */
+  hr {{
+    border-color: {BORDER} !important;
+    opacity: 0.85;
   }}
 
   /* Section card */
   .sfa-card {{
-    background: {SURFACE};
+    background: linear-gradient(180deg, #1a212b 0%, {SURFACE} 100%);
     border: 1px solid {BORDER};
     border-radius: 14px;
     padding: 0.9rem 1rem;
     margin-bottom: 0.6rem;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.15);
   }}
   .sfa-card-title {{
     font-size: 0.78rem;
@@ -129,13 +313,14 @@ def inject_global_css() -> None:
     display: inline-flex;
     align-items: center;
     gap: 0.28rem;
-    padding: 0.18rem 0.55rem;
+    padding: 0.22rem 0.65rem;
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 600;
     border: 1px solid transparent;
     line-height: 1.3;
     white-space: nowrap;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset;
   }}
   .sfa-badge-row {{
     display: flex;
@@ -295,19 +480,21 @@ def inject_global_css() -> None:
   }}
 
   .sfa-section {{
-    margin-top: 0.4rem;
-    margin-bottom: 0.2rem;
-    padding-bottom: 0.25rem;
+    margin-top: 0.55rem;
+    margin-bottom: 0.45rem;
+    padding: 0.15rem 0 0.4rem 0;
     border-bottom: 1px solid {BORDER};
-    font-size: 1.05rem;
-    font-weight: 650;
+    font-size: 1.08rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: {TEXT};
   }}
   .sfa-muted {{ color: {MUTED}; font-size: 0.88rem; }}
   .sfa-flag {{
     border-left: 3px solid {RED};
     background: {RED_SOFT};
     padding: 0.55rem 0.75rem;
-    border-radius: 0 10px 10px 0;
+    border-radius: 0 12px 12px 0;
     margin: 0.35rem 0;
     font-size: 0.9rem;
   }}
@@ -315,13 +502,16 @@ def inject_global_css() -> None:
     border-left: 3px solid {GREEN};
     background: {GREEN_SOFT};
     padding: 0.55rem 0.75rem;
-    border-radius: 0 10px 10px 0;
+    border-radius: 0 12px 12px 0;
     margin: 0.35rem 0;
   }}
   .sfa-peer-table {{
     width: 100%;
     border-collapse: collapse;
     font-size: 0.88rem;
+    background: {SURFACE};
+    border-radius: 12px;
+    overflow: hidden;
   }}
   .sfa-peer-table th {{
     text-align: left;
@@ -330,15 +520,16 @@ def inject_global_css() -> None:
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    padding: 0.45rem 0.5rem;
+    padding: 0.55rem 0.55rem;
     border-bottom: 1px solid {BORDER};
+    background: #12171f;
   }}
   .sfa-peer-table td {{
-    padding: 0.5rem 0.5rem;
+    padding: 0.55rem 0.55rem;
     border-bottom: 1px solid {BORDER};
     vertical-align: middle;
   }}
-  .sfa-peer-table tr:hover td {{ background: rgba(255,255,255,0.02); }}
+  .sfa-peer-table tr:hover td {{ background: rgba(255,255,255,0.025); }}
   .sfa-qbar {{
     height: 6px;
     border-radius: 4px;
