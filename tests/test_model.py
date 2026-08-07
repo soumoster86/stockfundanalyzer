@@ -130,3 +130,27 @@ def test_train_rejects_missing_features():
     df = make_label(df)
     with pytest.raises(ValueError, match="No feature"):
         train_outperformance_model(df, ["nonexistent"], kind="randomforest")
+
+
+def test_predict_proba_handles_inf():
+    from src.model import predict_proba
+
+    n = 30
+    rng = np.random.default_rng(2)
+    df = pd.DataFrame({
+        "ticker": [f"T{i}" for i in range(n)],
+        "date": pd.to_datetime([f"{2000 + i}-01-01" for i in range(n)]),
+        "roe": rng.uniform(5, 20, n),
+        "pe": rng.uniform(5, 30, n),
+        "fwd_return": rng.uniform(0, 0.4, n),
+        "bench_fwd_return": np.full(n, 0.1),
+    })
+    # Inject inf / huge like bad Yahoo PE
+    df.loc[0, "pe"] = np.inf
+    df.loc[1, "pe"] = -np.inf
+    df.loc[2, "roe"] = 1e20
+    df = make_label(df)
+    model, _ = train_outperformance_model(df, ["roe", "pe"], kind="randomforest")
+    probs = predict_proba(model, df, ["roe", "pe"])
+    assert len(probs) == n
+    assert np.isfinite(probs).all()

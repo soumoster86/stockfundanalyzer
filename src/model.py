@@ -153,10 +153,24 @@ def build_model(kind="lightgbm", **kw):
     return RandomForestClassifier(**rf_kw)
 
 
+def sanitize_features(X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Coerce to float, replace ±inf with NaN, clip absurd magnitudes.
+
+    Yahoo / fundamental ratios occasionally produce inf (e.g. PE with ~0 EPS).
+    sklearn SimpleImputer + trees then fail at predict with float64 overflow.
+    """
+    out = X.apply(pd.to_numeric, errors="coerce")
+    out = out.replace([np.inf, -np.inf], np.nan)
+    # Keep finite range well inside float64; still leaves room for large cash figures
+    out = out.clip(lower=-1e15, upper=1e15)
+    return out
+
+
 def _labeled(frame, feature_cols, label_col):
     """Keep rows with a non-null label and at least one non-null feature."""
     y = frame[label_col]
-    X = frame[feature_cols]
+    X = sanitize_features(frame[feature_cols])
     mask = y.notna() & X.notna().any(axis=1)
     return X.loc[mask].astype(float), y.loc[mask].astype(int)
 
@@ -311,7 +325,14 @@ def train_outperformance_model(
 def predict_proba(model, df, feature_cols):
     """Score rows; missing features are imputed by the fitted pipeline."""
     feature_cols = [c for c in feature_cols if c in df.columns]
-    X = df[feature_cols].astype(float)
+    # Align columns the model was trained on (missing → NaN → imputer)
+    X = pd.DataFrame(index=df.index)
+    for c in feature_cols:
+        if c in df.columns:
+            X[c] = df[c]
+        else:
+            X[c] = np.nan
+    X = sanitize_features(X[feature_cols])
     return model.predict_proba(X)[:, 1]
 
 
