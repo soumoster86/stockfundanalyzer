@@ -65,6 +65,61 @@ def test_train_rejects_too_few_rows():
         train_outperformance_model(df, ["roe"], kind="randomforest")
 
 
+def test_adaptive_split_uses_all_labels_when_sparse():
+    """20 labeled rows across 3 early dates — default split may put 19 in train."""
+    rng = np.random.default_rng(1)
+    rows = []
+    # Many empty-label recent dates (like a real fundamentals panel)
+    for year in range(2018, 2027):
+        for i in range(5):
+            rows.append({
+                "ticker": f"T{i}",
+                "date": pd.Timestamp(f"{year}-03-31"),
+                "roe": float(rng.uniform(5, 25)),
+                "pe": float(rng.uniform(10, 40)),
+                "fwd_return": np.nan,
+                "bench_fwd_return": np.nan,
+            })
+    # Exactly 20 labeled rows on early dates (7 + 12 + 1 pattern)
+    for i in range(7):
+        rows.append({
+            "ticker": f"L{i}",
+            "date": pd.Timestamp("2022-03-31"),
+            "roe": float(10 + i),
+            "pe": float(15 + i),
+            "fwd_return": 0.2 if i % 2 == 0 else 0.05,
+            "bench_fwd_return": 0.1,
+        })
+    for i in range(12):
+        rows.append({
+            "ticker": f"M{i}",
+            "date": pd.Timestamp("2023-03-31"),
+            "roe": float(12 + i),
+            "pe": float(18 + i),
+            "fwd_return": 0.25 if i % 3 else 0.02,
+            "bench_fwd_return": 0.1,
+        })
+    rows.append({
+        "ticker": "N0",
+        "date": pd.Timestamp("2023-06-30"),
+        "roe": 14.0,
+        "pe": 20.0,
+        "fwd_return": 0.3,
+        "bench_fwd_return": 0.1,
+    })
+    df = make_label(pd.DataFrame(rows))
+    model, report = train_outperformance_model(
+        df, ["roe", "pe"], kind="randomforest"
+    )
+    assert report["n_train"] >= MIN_TRAIN_ROWS
+    assert report["n_labeled_total"] == 20
+    assert report.get("split", {}).get("split") in (
+        "default_60_20_20",
+        "adaptive_expand_train",
+        "all_in_train",
+    )
+
+
 def test_train_rejects_missing_features():
     df = pd.DataFrame({
         "ticker": ["A"] * 25,

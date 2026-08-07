@@ -43,14 +43,34 @@ def render_train(data: pd.DataFrame) -> None:
     section("Train global outperformance model")
 
     has_labels = {"fwd_return", "bench_fwd_return"}.issubset(data.columns)
+    train_src = st.session_state.get("raw_panel", data)
     if has_labels:
-        n_lab = int(
+        n_lab_view = int(
             (data["fwd_return"].notna() & data["bench_fwd_return"].notna()).sum()
         )
+        n_lab_panel = 0
+        if isinstance(train_src, pd.DataFrame) and {
+            "fwd_return",
+            "bench_fwd_return",
+        }.issubset(train_src.columns):
+            n_lab_panel = int(
+                (
+                    train_src["fwd_return"].notna()
+                    & train_src["bench_fwd_return"].notna()
+                ).sum()
+            )
         st.caption(
-            f"Labeled rows in current view: **{n_lab}** "
-            f"(training uses the full multi-year panel when available)."
+            f"Labeled rows — current view: **{n_lab_view}** · "
+            f"full panel used for train: **{n_lab_panel}** "
+            f"(need ≥ **15** usable labeled rows with both classes)."
         )
+        if 0 < n_lab_panel < 40:
+            st.info(
+                f"**{n_lab_panel}** panel rows have both return labels. "
+                "A 3-year horizon only labels older fiscal years — more history "
+                "or `--horizon-years 1`/`2` will train a more reliable model."
+            )
+
     else:
         st.warning(
             "Current data has no label columns. "
@@ -66,6 +86,14 @@ Needs `fwd_return` + `bench_fwd_return` (realized forward returns).
 pip install yfinance
 python -m src.build_labels --in fundamentals.csv --out labeled.csv \\
   --horizon-years 3 --benchmark ^NSEI
+```
+
+If training fails with “need 20 labeled rows”, try a **shorter** horizon so more
+recent years get labels:
+
+```bash
+python -m src.build_labels --in fundamentals.csv --out labeled.csv \\
+  --horizon-years 1 --benchmark ^NSEI
 ```
 
 Then re-upload `labeled.csv`. Models are **session-scoped** on Cloud but you can

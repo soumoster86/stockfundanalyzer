@@ -35,7 +35,9 @@ try:
 except ImportError:
     HAS_XGB = False
 
-MIN_TRAIN_ROWS = 20
+# Sparse India panels often have few realized multi-year forward returns.
+# 15 is enough for a thin RandomForest; prefer more labels when possible.
+MIN_TRAIN_ROWS = 15
 
 
 def make_label(df, ticker_col="ticker", date_col="date",
@@ -78,6 +80,57 @@ def time_split(df, date_col="date", train_end=None, valid_end=None):
     valid = df[(dates > train_end) & (dates <= valid_end)]
     test = df[dates > valid_end]
     return train, valid, test
+
+
+def adaptive_time_split(
+    df,
+    feature_cols,
+    date_col="date",
+    label_col="target_outperform",
+    min_train_rows: int = MIN_TRAIN_ROWS,
+):
+    """
+    Time-based split that expands the train window when labels are sparse.
+
+    Default 60/20/20-by-date often leaves almost all labels in valid/test when
+    only early fiscal years have realized forward returns (e.g. 20 labeled rows
+    total → 19 in train). Walk train_end later until min_train_rows labeled
+    rows exist (still no future leakage into train). If still short, put all
+    labeled history in train.
+    """
+    train, valid, test = time_split(df, date_col=date_col)
+    Xtr, ytr = _labeled(train, feature_cols, label_col)
+    if len(ytr) >= min_train_rows and ytr.nunique() >= 2:
+        return train, valid, test, {"split": "default_60_20_20"}
+
+    dates = pd.to_datetime(df[date_col])
+    unique = pd.Series(sorted(dates.dropna().unique()))
+    if unique.empty:
+        return train, valid, test, {"split": "empty"}
+
+    # Expand train_end date-by-date until enough labeled train rows
+    for i in range(len(unique)):
+        train_end = unique.iloc[i]
+        tr = df[dates <= train_end]
+        Xtr, ytr = _labeled(tr, feature_cols, label_col)
+        if len(ytr) >= min_train_rows and ytr.nunique() >= 2:
+            # Remainder → valid (no separate test when labels are scarce)
+            va = df[dates > train_end]
+            te = df.iloc[0:0].copy()
+            return tr, va, te, {
+                "split": "adaptive_expand_train",
+                "train_end": str(pd.Timestamp(train_end).date()),
+                "n_train_labeled": int(len(ytr)),
+            }
+
+    # Last resort: everything in train (still better than refusing to fit)
+    Xall, yall = _labeled(df, feature_cols, label_col)
+    empty = df.iloc[0:0].copy()
+    return df, empty, empty, {
+        "split": "all_in_train",
+        "n_train_labeled": int(len(yall)),
+        "n_labeled_total": int(len(yall)),
+    }
 
 
 def build_model(kind="lightgbm", **kw):
@@ -130,12 +183,26 @@ def train_outperformance_model(
         raise ValueError("No feature columns present in the training frame.")
 
     work = df.dropna(subset=[date_col]).copy()
-    train, valid, test = time_split(work, date_col)
+    if label_col not in work.columns:
+        raise ValueError(
+            f"Missing label column `{label_col}`. Run make_label() first "
+            "(needs fwd_return and bench_fwd_return)."
+        )
+
+    train, valid, test, split_info = adaptive_time_split(
+        work, feature_cols, date_col=date_col, label_col=label_col
+    )
 
     Xtr, ytr = _labeled(train, feature_cols, label_col)
+    X_all, y_all = _labeled(work, feature_cols, label_col)
     if len(ytr) < MIN_TRAIN_ROWS:
         raise ValueError(
-            f"Need at least {MIN_TRAIN_ROWS} labeled training rows; got {len(ytr)}."
+            f"Need at least {MIN_TRAIN_ROWS} labeled training rows; got {len(ytr)} "
+            f"in train ({len(y_all)} labeled in the whole panel). "
+            "Forward-return labels only exist for older fiscal years (need price "
+            "history through the label horizon). Re-run "
+            "`python -m src.build_labels` with more history, or a shorter "
+            "`--horizon-years` (e.g. 1 or 2), then re-upload labeled.csv."
         )
     if ytr.nunique() < 2:
         raise ValueError("Training labels are all the same class — cannot fit a classifier.")
@@ -149,11 +216,14 @@ def train_outperformance_model(
 
     report = {
         "n_train": int(len(ytr)),
+        "n_labeled_total": int(len(y_all)),
         "train_base_rate": float(ytr.mean()),
         "baseline_auc": 0.5,
         "features": list(feature_cols),
         "calibrated": False,
+        "split": split_info,
     }
+
 
     # Optional probability calibration on the validation slice
     if calibrate:
@@ -201,12 +271,39 @@ def train_outperformance_model(
             inner = inner.calibrated_classifiers_[0].estimator
         except Exception:
             inner = clf_step
-    if hasattr(inner, "feature_importances_"):
-        imp = pd.Series(inner.feature_importances_, index=feature_cols)
-        report["feature_importance"] = imp.sort_values(ascending=False)
-    elif hasattr(clf_step, "feature_importances_"):
-        imp = pd.Series(clf_step.feature_importances_, index=feature_cols)
-        report["feature_importance"] = imp.sort_values(ascending=False)
+    # Imputer may drop all-null columns → importances length < len(feature_cols)
+    kept_features = list(feature_cols)
+    imputer = pipe.named_steps.get("imputer")
+    if imputer is not None and hasattr(imputer, "statistics_"):
+        stats = np.asarray(imputer.statistics_)
+        if len(stats) == len(feature_cols):
+            kept_features = [
+                f for f, s in zip(feature_cols, stats) if not (isinstance(s, float) and np.isnan(s))
+            ]
+            # sklearn keep_empty_features default False drops nan statistics cols
+            mask = ~np.isnan(stats.astype(float, copy=False))
+            if mask.shape[0] == len(feature_cols) and hasattr(inner, "feature_importances_"):
+                if int(mask.sum()) == len(inner.feature_importances_):
+                    kept_features = [f for f, m in zip(feature_cols, mask) if m]
+    try:
+        if hasattr(inner, "feature_importances_"):
+            fi = inner.feature_importances_
+            if len(fi) == len(kept_features):
+                report["feature_importance"] = pd.Series(fi, index=kept_features).sort_values(
+                    ascending=False
+                )
+            elif len(fi) == len(feature_cols):
+                report["feature_importance"] = pd.Series(fi, index=feature_cols).sort_values(
+                    ascending=False
+                )
+        elif hasattr(clf_step, "feature_importances_"):
+            fi = clf_step.feature_importances_
+            if len(fi) == len(kept_features):
+                report["feature_importance"] = pd.Series(fi, index=kept_features).sort_values(
+                    ascending=False
+                )
+    except Exception as e:
+        report["feature_importance_error"] = str(e)
 
     return pipe, report
 
