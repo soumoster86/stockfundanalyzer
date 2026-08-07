@@ -1,0 +1,15 @@
+{
+  "generated_at_utc": "2026-08-07T05:08:58Z",
+  "source": "github-actions daily-fundamentals",
+  "n_rows": 4643,
+  "n_tickers": 2367,
+  "workflow_run": "31147469723",
+  "workflow_url": "https://github.com/soumoster86/stockfundanalyzer/actions/runs/31147469723",
+  "ref": "main",
+  "repository": "soumoster86/stockfundanalyzer",
+  "max_tickers": 0,
+  "use_sector": "true",
+  "commit_csv": "true",
+  "sleep_s": "0.4",
+  "stocks_csv": "stocks.csv"
+}
