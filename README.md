@@ -70,8 +70,15 @@ rather than ranking on a stub.
 **Sanity / corporate-action guards** — flags rows whose figures are distorted:
 revenue or share count jumping >150% year-over-year (likely merger/demerger/
 split), negative equity (D/E and ROE meaningless), P/E above 200, margins above
-100%, or ROE above 100% (tiny equity base). These get a "verify manually"
-warning and can be filtered out in the ranking via the **Data** filter.
+100%, ROE above 100% (tiny equity base), or dividend yield above 25%. These get
+a "verify manually" warning and can be filtered out in the ranking via the
+**Data** filter.
+
+**Broken values rank worst, not best:** for lower-is-better metrics a naive
+inverted rank would make a negative P/E, P/B, EV/EBITDA or D/E look like the
+cheapest / least-levered stock. The scorer instead ranks negative values at the
+bottom, and treats a loss-maker's blank P/E (Yahoo omits it when EPS < 0) as the
+worst P/E rather than dropping it from the Valuation score.
 
 *Honest limitation:* a clean demerger where the data provider restates the prior
 year (so no year-over-year jump appears) is invisible to these checks — only the

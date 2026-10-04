@@ -73,3 +73,59 @@ def test_small_sector_falls_back(sample_panel):
     scored = compute_quality_score(df, group_cols=("date", "sector"), min_group_size=5)
     assert "quality_score" in scored.columns
     assert scored["quality_score"].notna().any()
+
+
+def _one_date(**cols):
+    n = len(next(iter(cols.values())))
+    return pd.DataFrame({
+        "ticker": [f"T{i}" for i in range(n)],
+        "date": pd.to_datetime(["2020-01-01"] * n),
+        **cols,
+    })
+
+
+def test_negative_debt_to_equity_ranks_worst_not_best():
+    df = _one_date(debt_to_equity=[-2.0, 0.0, 0.5, 1.0, 2.0])
+    scored = compute_quality_score(df, group_cols=("date",))
+    pct = scored.set_index("debt_to_equity")["_pct_debt_to_equity"]
+    assert pct[-2.0] == pct.min()
+    assert pct[0.0] == pct.max()  # debt-free is genuinely the best
+
+
+def test_negative_pe_ranks_worst():
+    df = _one_date(pe=[-5.0, 10.0, 20.0, 30.0, 40.0])
+    scored = compute_quality_score(df, group_cols=("date",))
+    pct = scored.set_index("pe")["_pct_pe"]
+    assert pct[-5.0] == pct.min()
+    assert pct[10.0] == pct.max()
+
+
+def test_loss_maker_with_blank_pe_ranks_worst_on_pe():
+    df = _one_date(
+        pe=[float("nan"), 10.0, 20.0, 30.0, 40.0],
+        net_profit=[-50.0, 10.0, 10.0, 10.0, 10.0],
+    )
+    scored = compute_quality_score(df, group_cols=("date",))
+    loss_pct = scored.loc[scored["ticker"] == "T0", "_pct_pe"].iloc[0]
+    assert loss_pct == scored["_pct_pe"].min()
+    assert scored.loc[scored["ticker"] == "T0", "valuation_score"].notna().all()
+
+
+def test_blank_pe_without_loss_stays_unranked():
+    df = _one_date(
+        pe=[float("nan"), 10.0, 20.0, 30.0, 40.0],
+        net_profit=[50.0, 10.0, 10.0, 10.0, 10.0],
+    )
+    scored = compute_quality_score(df, group_cols=("date",))
+    assert pd.isna(scored.loc[scored["ticker"] == "T0", "_pct_pe"].iloc[0])
+
+
+def test_loss_maker_not_penalised_when_no_peer_has_pe():
+    # e.g. a historical fiscal year with no valuation data at all
+    df = _one_date(
+        pe=[float("nan")] * 5,
+        net_profit=[-50.0, 10.0, 10.0, 10.0, 10.0],
+        roe=[5.0, 10.0, 15.0, 20.0, 25.0],
+    )
+    scored = compute_quality_score(df, group_cols=("date",))
+    assert scored["_pct_pe"].isna().all()

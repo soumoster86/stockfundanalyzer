@@ -31,6 +31,7 @@ SANITY_THRESHOLDS = {
     "pe_extreme": 200.0,         # P/E above this is effectively meaningless
     "margin_impossible": 100.0,  # net/operating margin > 100% -> accounting artifact
     "roe_extreme": 100.0,        # ROE above this usually = tiny/negative equity base
+    "dividend_yield_extreme": 25.0,  # yield (percent points) above this = data glitch
 }
 
 
@@ -74,6 +75,7 @@ def data_sanity_flags(df, by="ticker", date_col="date", thresholds=None):
       bad_pe_extreme    : P/E absurdly high
       bad_margin        : net or operating margin physically implausible (>100%)
       bad_roe_extreme   : |ROE| implausibly high (usually tiny equity base)
+      bad_dividend_yield: dividend yield implausibly high (stale price / glitch)
     """
     t = {**SANITY_THRESHOLDS, **(thresholds or {})}
     d = df.sort_values([by, date_col]).copy() if date_col in df.columns else df.copy()
@@ -99,6 +101,10 @@ def data_sanity_flags(df, by="ticker", date_col="date", thresholds=None):
     w["bad_margin"] = margin_bad
     if "roe" in d.columns:
         w["bad_roe_extreme"] = (d["roe"].abs() > t["roe_extreme"]).fillna(False)
+    if "dividend_yield" in d.columns:
+        w["bad_dividend_yield"] = (
+            d["dividend_yield"] > t["dividend_yield_extreme"]
+        ).fillna(False)
 
     warn_cols = list(w.columns)
     d = pd.concat([d, w], axis=1)
@@ -120,4 +126,5 @@ WARNING_TEXT = {
     "bad_pe_extreme": "Extreme P/E (>200) — earnings near zero; valuation read unreliable",
     "bad_margin": "Margin exceeds 100% — likely a one-off accounting item, not operating reality",
     "bad_roe_extreme": "Extreme ROE (>100%) — usually a tiny or distorted equity base",
+    "bad_dividend_yield": "Dividend yield above 25% — almost certainly a data error; verify",
 }

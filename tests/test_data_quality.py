@@ -40,3 +40,15 @@ def test_sanity_flags_extreme_pe_and_jump():
     assert warn_cols
     latest = out.sort_values("date").iloc[-1]
     assert latest["data_warning"] or latest.get("data_warning_count", 0) > 0
+
+
+def test_sanity_flags_extreme_dividend_yield():
+    df = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "date": pd.to_datetime(["2020-01-01", "2020-01-01"]),
+        "dividend_yield": [146.0, 2.5],
+    })
+    out, warn_cols = data_sanity_flags(df)
+    assert "bad_dividend_yield" in warn_cols
+    flagged = out.set_index("ticker")["bad_dividend_yield"]
+    assert flagged["A"] and not flagged["B"]

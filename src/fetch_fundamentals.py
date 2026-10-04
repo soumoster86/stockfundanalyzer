@@ -25,6 +25,8 @@ import time
 import numpy as np
 import pandas as pd
 
+from src.data_quality import SANITY_THRESHOLDS
+
 try:
     import yfinance as yf
 except ImportError:
@@ -71,6 +73,34 @@ def _pct_change(curr, prev):
     return (curr - prev) / abs(prev)
 
 
+def _fcf(cf, col):
+    """Free cash flow for one fiscal year: reported, else operating CF + capex."""
+    if col is None:
+        return np.nan
+    fcf = _safe(cf, ["Free Cash Flow"], col)
+    if pd.isna(fcf):
+        op_cf = _safe(cf, ["Operating Cash Flow",
+                           "Cash Flow From Continuing Operating Activities"], col)
+        capex = _safe(cf, ["Capital Expenditure"], col)
+        if pd.notna(op_cf) and pd.notna(capex):
+            fcf = op_cf + capex  # capex is negative
+    return fcf
+
+
+def _cash_paid(cf, row_names, col):
+    """Cash-flow outflows (dividends, buybacks) are reported negative; return the size."""
+    if col is None:
+        return np.nan
+    v = _safe(cf, row_names, col)
+    return abs(v) if pd.notna(v) else np.nan
+
+
+DIVIDEND_ROWS = ["Cash Dividends Paid", "Common Stock Dividend Paid"]
+BUYBACK_ROWS = ["Repurchase Of Capital Stock", "Common Stock Payments"]
+EPS_ROWS = ["Diluted EPS", "Basic EPS"]
+SHARE_ROWS = ["Ordinary Shares Number", "Share Issued"]
+
+
 def fetch_one(ticker: str, date_str: str) -> list:
     """Return one or two rows (latest two fiscal years) for a ticker."""
     rows = []
@@ -89,6 +119,15 @@ def fetch_one(ticker: str, date_str: str) -> list:
 
     all_cols = list(fin.columns)
     years = all_cols[:2]            # emit up to 2 most recent fiscal years
+
+    # Some Indian listings (e.g. INFY.NS) report statements in USD while price /
+    # market cap are in INR — don't divide one by the other.
+    fin_ccy, px_ccy = info.get("financialCurrency"), info.get("currency")
+    same_ccy = not fin_ccy or not px_ccy or fin_ccy == px_ccy
+
+    div_yield = info.get("dividendYield", np.nan) or np.nan
+    if pd.notna(div_yield) and div_yield > SANITY_THRESHOLDS["dividend_yield_extreme"]:
+        div_yield = np.nan  # Yahoo glitch (seen: 146%) — would rank as the best payer
 
     for i, ycol in enumerate(years):
         # previous year column for growth calc: the next column in the full list
@@ -121,18 +160,28 @@ def fetch_one(ticker: str, date_str: str) -> list:
         market_cap = info.get("marketCap", np.nan) if i == 0 else np.nan
 
         op_cf = _safe(cf, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"], ycol)
-        capex = _safe(cf, ["Capital Expenditure"], ycol)
-        fcf = _safe(cf, ["Free Cash Flow"], ycol)
-        if pd.isna(fcf) and pd.notna(op_cf) and pd.notna(capex):
-            fcf = op_cf + capex  # capex is negative
+        fcf = _fcf(cf, ycol)
+        eps = _safe(fin, EPS_ROWS, ycol)
+        dividends = _cash_paid(cf, DIVIDEND_ROWS, ycol)
+        buyback = _cash_paid(cf, BUYBACK_ROWS, ycol)
 
         # growth vs previous column
         rev_p = _safe(fin, ["Total Revenue", "Operating Revenue"], pcol) if pcol else np.nan
         op_p = _safe(fin, ["Operating Income"], pcol) if pcol else np.nan
         ebitda_p = _safe(fin, ["EBITDA", "Normalized EBITDA"], pcol) if pcol else np.nan
-        opcf_p = _safe(cf, ["Operating Cash Flow"], pcol) if pcol else np.nan
+        fcf_p = _fcf(cf, pcol)
+        eps_p = _safe(fin, EPS_ROWS, pcol) if pcol else np.nan
+        dividends_p = _cash_paid(cf, DIVIDEND_ROWS, pcol)
 
-        shares = info.get("sharesOutstanding", np.nan)
+        # Per-year share count from the balance sheet so YoY dilution is visible;
+        # info's sharesOutstanding is today's count, so only use it for the latest year.
+        shares = _safe(bs, SHARE_ROWS, ycol)
+        if pd.isna(shares) and i == 0:
+            shares = info.get("sharesOutstanding", np.nan)
+
+        buyback_yield = np.nan
+        if i == 0 and same_ccy and pd.notna(buyback) and pd.notna(market_cap) and market_cap > 0:
+            buyback_yield = buyback / market_cap * 100  # percent points, like dividend_yield
 
         row = {c: np.nan for c in OUTPUT_COLUMNS}
         row.update(dict(
@@ -140,9 +189,9 @@ def fetch_one(ticker: str, date_str: str) -> list:
             date=pd.to_datetime(ycol).strftime("%Y-%m-%d"),
             sector=info.get("sector") or "Unknown",
             revenue_growth=_pct_change(revenue, rev_p),
-            eps_growth=np.nan,  # needs per-year EPS history; trailing only
+            eps_growth=_pct_change(eps, eps_p),
             operating_profit_growth=_pct_change(op_income, op_p),
-            fcf_growth=_pct_change(fcf, opcf_p) if pd.notna(fcf) else np.nan,
+            fcf_growth=_pct_change(fcf, fcf_p),
             ebitda_growth=_pct_change(ebitda, ebitda_p),
             roe=(net_income / equity * 100) if pd.notna(net_income) and pd.notna(equity) and equity else np.nan,
             roce=(op_income / capital_employed * 100) if pd.notna(op_income) and pd.notna(capital_employed) and capital_employed else np.nan,
@@ -153,8 +202,9 @@ def fetch_one(ticker: str, date_str: str) -> list:
             interest_coverage=(op_income / abs(interest_exp)) if pd.notna(op_income) and pd.notna(interest_exp) and interest_exp else np.nan,
             current_ratio=(cur_assets / cur_liab) if pd.notna(cur_assets) and pd.notna(cur_liab) and cur_liab else np.nan,
             cash_position=cash,
-            dividend_yield=(info.get("dividendYield", np.nan) or np.nan) if i == 0 else np.nan,
-            buyback_yield=np.nan,
+            dividend_yield=div_yield if i == 0 else np.nan,
+            dividend_growth=_pct_change(dividends, dividends_p),
+            buyback_yield=buyback_yield,
             pe=info.get("trailingPE", np.nan) if i == 0 else np.nan,
             pb=info.get("priceToBook", np.nan) if i == 0 else np.nan,
             ev_ebitda=info.get("enterpriseToEbitda", np.nan) if i == 0 else np.nan,

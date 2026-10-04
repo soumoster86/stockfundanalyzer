@@ -16,6 +16,10 @@ import pandas as pd
 #   direction = +1  -> higher is better
 #   direction = -1  -> lower is better (valuation multiples)
 #   weight    = within-category weight (each category sums to 1.0)
+#   negative_is_worst = a negative value means losses / negative equity, not
+#                       "cheap" or "low leverage" -> rank it at the bottom
+#   missing_if_loss   = blank for loss-makers (Yahoo omits P/E when EPS < 0)
+#                       -> rank at the bottom instead of skipping the metric
 # ---------------------------------------------------------------------------
 METRIC_CONFIG = {
     "Financial Performance": {
@@ -41,7 +45,7 @@ METRIC_CONFIG = {
     "Financial Strength": {
         "weight": 0.20,
         "metrics": {
-            "debt_to_equity":          {"direction": -1, "weight": 0.30},
+            "debt_to_equity":          {"direction": -1, "weight": 0.30, "negative_is_worst": True},
             "interest_coverage":       {"direction": +1, "weight": 0.30},
             "current_ratio":           {"direction": +1, "weight": 0.20},
             "cash_position":           {"direction": +1, "weight": 0.20},
@@ -59,10 +63,11 @@ METRIC_CONFIG = {
     "Valuation": {
         "weight": 0.20,
         "metrics": {
-            "pe":          {"direction": -1, "weight": 0.25},
-            "pb":          {"direction": -1, "weight": 0.20},
-            "ev_ebitda":   {"direction": -1, "weight": 0.25},
-            "peg":         {"direction": -1, "weight": 0.15},
+            "pe":          {"direction": -1, "weight": 0.25,
+                            "negative_is_worst": True, "missing_if_loss": True},
+            "pb":          {"direction": -1, "weight": 0.20, "negative_is_worst": True},
+            "ev_ebitda":   {"direction": -1, "weight": 0.25, "negative_is_worst": True},
+            "peg":         {"direction": -1, "weight": 0.15, "negative_is_worst": True},
             "price_sales": {"direction": -1, "weight": 0.15},
         },
     },
@@ -72,6 +77,30 @@ METRIC_CONFIG = {
 def _percentile_rank(s: pd.Series) -> pd.Series:
     """Cross-sectional percentile rank in [0,1]; NaNs stay NaN."""
     return s.rank(pct=True)
+
+
+def _rank_input(out: pd.DataFrame, metric: str, m_cfg: dict, group_keys: list) -> pd.Series:
+    """
+    Metric values to rank, with economically broken values pushed to the worst end.
+
+    A negative P/E or D/E would otherwise invert into the *best* percentile, and a
+    loss-maker's blank P/E would silently drop out of its Valuation score.
+    """
+    s = pd.to_numeric(out[metric], errors="coerce")
+    invalid = pd.Series(False, index=out.index)
+    if m_cfg.get("negative_is_worst"):
+        invalid |= s < 0
+    if m_cfg.get("missing_if_loss"):
+        loss = pd.Series(False, index=out.index)
+        for col in ("net_profit", "net_margin"):
+            if col in out.columns:
+                loss |= pd.to_numeric(out[col], errors="coerce") < 0
+        # Only where peers have real values — otherwise (e.g. a historical year
+        # with no valuation data) loss-makers would be the only rows ranked.
+        peers_have_values = s.groupby(group_keys).transform("count") > 0
+        invalid |= s.isna() & loss & peers_have_values
+    worst = np.inf if m_cfg["direction"] < 0 else -np.inf
+    return s.mask(invalid, worst)
 
 
 # Default category weights, exposed for UI defaults
@@ -147,7 +176,9 @@ def compute_quality_score(
                 continue
             direction = m_cfg["direction"]
             # percentile rank within the group; invert if lower-is-better
-            ranked = out.groupby(effective_groups)[metric].transform(_percentile_rank)
+            group_keys = [out[c] for c in effective_groups]
+            values = _rank_input(out, metric, m_cfg, group_keys)
+            ranked = values.groupby(group_keys).transform(_percentile_rank)
             if direction < 0:
                 ranked = 1.0 - ranked
             # retain the raw percentile for explainability
