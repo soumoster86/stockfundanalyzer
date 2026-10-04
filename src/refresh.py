@@ -8,7 +8,6 @@ not rely on this (rate limits / no long jobs).
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -87,7 +86,7 @@ def refresh_fundamentals(
             "message": "yfinance is not installed. Run: pip install yfinance",
         }
 
-    from src.fetch_fundamentals import OUTPUT_COLUMNS, fetch_one, _blank_row
+    from src.fetch_fundamentals import OUTPUT_COLUMNS, _blank_row, fetch_one
 
     root = Path(project_dir)
     path, resolved = resolve_tickers_csv(root, tickers)

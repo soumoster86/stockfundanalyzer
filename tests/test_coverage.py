@@ -1,7 +1,7 @@
 """Data coverage summary."""
 import pandas as pd
 
-from src.coverage import coverage_summary, coverage_banner_text, coverage_detail_lines
+from src.coverage import coverage_banner_text, coverage_detail_lines, coverage_summary
 from src.enrich import enrich
 from src.sample_data import sample_dataframe
 

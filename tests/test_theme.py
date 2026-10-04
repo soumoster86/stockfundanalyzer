@@ -2,13 +2,13 @@
 import pandas as pd
 
 from ui.theme import (
-    band_text,
+    _f_test_state,
     badge,
+    band_text,
+    f_score_breakdown_html,
     format_band_columns,
     peers_html_table,
     quality_color,
-    f_score_breakdown_html,
-    _f_test_state,
 )
 
 
@@ -60,7 +60,7 @@ def test_peers_html_has_badges():
 
 
 def test_f_score_breakdown_visual():
-    from src.institutional_scores import PIOTROSKI_TESTS, PIOTROSKI_LABELS
+    from src.institutional_scores import PIOTROSKI_LABELS, PIOTROSKI_TESTS
 
     row = {t: 1.0 for t in PIOTROSKI_TESTS}
     row["pf_no_dilution"] = 0.0

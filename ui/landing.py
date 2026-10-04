@@ -6,11 +6,6 @@ Hero uses responsive title so it is not clipped by the top chrome.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import streamlit as st
-
 # Full feature catalog shown on login + empty landing
 FEATURE_GROUPS = [
     {

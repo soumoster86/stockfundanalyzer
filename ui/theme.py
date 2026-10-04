@@ -667,8 +667,6 @@ def peers_html_table(peers: pd.DataFrame) -> str:
         ticker = str(r.get("ticker", "")).replace(".NS", "")
         q = r.get("quality_score")
         q_txt = f"{float(q):.0f}" if pd.notna(q) else "—"
-        z = band_text(r.get("z_band"), "z") if "z_band" in peers.columns else "—"
-        m = band_text(r.get("m_band"), "m") if "m_band" in peers.columns else "—"
         # colored badge HTML for Z/M
         zb = r.get("z_band") if "z_band" in peers.columns else None
         mb = r.get("m_band") if "m_band" in peers.columns else None

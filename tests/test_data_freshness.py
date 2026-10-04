@@ -1,5 +1,4 @@
 """Fundamentals meta / provenance helpers."""
-import json
 from pathlib import Path
 
 from src.data_freshness import (

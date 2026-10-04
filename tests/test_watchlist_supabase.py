@@ -1,13 +1,13 @@
 """Watchlist dual-backend (session + mocked Supabase)."""
 from src.watchlist import (
-    SESSION_KEY,
     HYDRATED_KEY,
+    SESSION_KEY,
     add_ticker,
+    backend_name,
+    ensure_hydrated,
     get_watchlist,
     remove_ticker,
     set_watchlist,
-    ensure_hydrated,
-    backend_name,
 )
 from src.watchlist_supabase import normalize_supabase_url
 

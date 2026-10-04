@@ -8,3 +8,5 @@ ignore = ["E501"]  # line length handled softly; Streamlit UI is verbose
 [lint.per-file-ignores]
 "tests/*" = ["E402"]
 "scripts/*" = ["E402"]
+# Trailing double-spaces are Markdown hard line breaks in the tutorial copy.
+"ui/tabs/tutorial.py" = ["W291"]

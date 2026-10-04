@@ -15,6 +15,14 @@ import pandas as pd
 import streamlit as st
 
 from src.auth import login_gate, logout_button
+from src.coverage import coverage_banner_text, coverage_detail_lines, coverage_summary
+from src.data_freshness import (
+    format_freshness_detail,
+    format_freshness_line,
+    is_github_daily,
+    latest_success_meta_from_supabase,
+    load_fundamentals_meta,
+)
 from src.enrich import build_history_panel, config_from_weights, enrich, is_tickers_only
 from src.governance import governance_template_csv, merge_governance
 from src.quality_score import (
@@ -24,6 +32,7 @@ from src.quality_score import (
 )
 from src.sample_data import COLUMN_DOCS, sample_csv_bytes, sample_dataframe
 from src.schema import prepare_panel
+from ui.landing import render_hero
 from ui.nav import (
     ALL_PAGES,
     NAV_BY_MODE,
@@ -90,8 +99,6 @@ def cached_history(raw_df: pd.DataFrame, use_sector: bool, weights_tuple: tuple)
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-from ui.landing import render_hero
-
 render_hero(
     st,
     subtitle=(
@@ -317,14 +324,6 @@ for note in validation.info:
     st.caption(f"ℹ️ {note}")
 
 # Data freshness / provenance (GitHub daily pipeline vs upload/demo)
-from src.data_freshness import (
-    format_freshness_detail,
-    format_freshness_line,
-    is_github_daily,
-    latest_success_meta_from_supabase,
-    load_fundamentals_meta,
-)
-
 _date_min = _date_max = None
 if "date" in raw.columns and raw["date"].notna().any():
     _date_min = pd.to_datetime(raw["date"], errors="coerce").min()
@@ -624,8 +623,6 @@ history_panel = cached_history(raw, use_sector, weights_tuple)
 # ---------------------------------------------------------------------------
 # Summary banner + data coverage + navigation
 # ---------------------------------------------------------------------------
-from src.coverage import coverage_banner_text, coverage_detail_lines, coverage_summary
-
 _cov = coverage_summary(data, raw=raw)
 st.caption(coverage_banner_text(_cov))
 with st.expander("📋 Data coverage details", expanded=False):

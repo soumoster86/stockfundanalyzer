@@ -112,8 +112,8 @@ def get_client():
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise RuntimeError(
-            f"Supabase url must be https://<project-ref>.supabase.co "
-            f"(got scheme/host invalid). Check Streamlit secrets [supabase].url"
+            "Supabase url must be https://<project-ref>.supabase.co "
+            "(got scheme/host invalid). Check Streamlit secrets [supabase].url"
         )
     if "supabase.co" not in parsed.netloc and "localhost" not in parsed.netloc:
         # still allow custom domains / local, but warn via path of call

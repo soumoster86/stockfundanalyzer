@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from src.ranking import rank_universe
-from ui.theme import section, badge_row
+from ui.theme import badge_row, section
 
 
 def render_sector(data: pd.DataFrame) -> None:
