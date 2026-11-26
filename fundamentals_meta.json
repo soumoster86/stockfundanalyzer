@@ -1,10 +1,10 @@
 {
-  "generated_at_utc": "2026-11-25T11:41:15Z",
+  "generated_at_utc": "2026-11-26T11:11:00Z",
   "source": "github-actions daily-fundamentals",
   "n_rows": 4711,
   "n_tickers": 2367,
-  "workflow_run": "45599989542",
-  "workflow_url": "https://github.com/soumoster86/stockfundanalyzer/actions/runs/45599989542",
+  "workflow_run": "45802653428",
+  "workflow_url": "https://github.com/soumoster86/stockfundanalyzer/actions/runs/45802653428",
   "ref": "main",
   "repository": "soumoster86/stockfundanalyzer",
   "max_tickers": 0,
